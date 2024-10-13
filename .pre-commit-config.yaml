@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.381
+    hooks:
+      - id: pyright
+  - repo: https://github.com/pycqa/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+  - repo: https://github.com/pycqa/bandit
+    rev: 1.7.9
+    hooks:
+      - id: bandit
+        args: ["-c", "pyproject.toml", "-r"]
+        additional_dependencies: [".[toml]"]
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8

@@ -1,0 +1,70 @@
+[project]
+name = "slipstream"
+dynamic = ["version"]
+description = "Streamline your stream processing."
+authors = [{ name = "Menziess", email = "stefan_schenk@hotmail.com" }]
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["kafka", "pubsub"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8.1"
+dependencies = [
+  "pypubsub >=4.0.3",
+  "aiokafka",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pydocstyle",
+  "autopep8",
+  "pyright",
+  "flake8",
+  "bandit",
+  "pre-commit",
+]
+
+[project.urls]
+repository = "https://github.com/Menziess/slipstream"
+documentation = "https://slipstream.readthedocs.io"
+
+[project.scripts]
+slipstream = "slipstream.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "slipstream.__version__.VERSION"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["slipstream*"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 79
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules"
+testpaths = [
+  "slipstream",
+  "tests",
+]
+markers = [
+  "serial"
+]
