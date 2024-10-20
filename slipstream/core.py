@@ -99,7 +99,7 @@ class Topic:
             await consumer.stop()
 
 
-def slap(
+def handle(
     *iterable: Union[Iterable, AsyncIterable],
     sink: Iterable[Callable[..., None]] = []
 ):

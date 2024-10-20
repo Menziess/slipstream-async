@@ -4,7 +4,7 @@ import asyncio
 from asyncio import run
 from time import sleep, strftime
 
-from slipstream import Topic, slap, stream
+from slipstream import Topic, handle, stream
 
 t1 = Topic(
     bootstrap_servers='localhost:29091',
@@ -30,17 +30,17 @@ async def atimer(interval=1.0):
         await asyncio.sleep(interval)
 
 
-@slap(atimer())
+@handle(atimer())
 def handler0(msg):
     print(msg)
 
 
-@slap(t1)
+@handle(t1)
 def handler1(msg):
     print(msg)
 
 
-@slap(t2)
+@handle(t2)
 def handler2(msg):
     print(msg)
 
