@@ -26,6 +26,9 @@ dependencies = []
 kafka = [
   "aiokafka",
 ]
+cache = [
+  "rocksdict",
+]
 dev = [
   "pydocstyle",
   "autopep8",
