@@ -1,10 +1,10 @@
 """Core module."""
 
-from asyncio import gather, sleep
+from asyncio import gather
 from collections.abc import AsyncIterable
 from inspect import signature
 from re import sub
-from typing import Any, Callable, Iterable, Union
+from typing import Any, Callable, Iterable
 
 from aiokafka import AIOKafkaConsumer
 
@@ -30,13 +30,13 @@ class Singleton(type):
 
 
 class Conf(metaclass=Singleton):
-    iterables: set[tuple[str, Union[Iterable, AsyncIterable]]] = set()
+    iterables: set[tuple[str, AsyncIterable]] = set()
     handlers: dict[str, set[Callable[..., None]]] = {}
 
     def register_iterable(
         self,
         key: str,
-        it: Union[Iterable, AsyncIterable]
+        it: AsyncIterable
     ):
         """Add iterable to global Conf."""
         self.iterables.add((key, it))
@@ -57,21 +57,10 @@ class Conf(metaclass=Singleton):
             for key, it in self.iterables]
         )
 
-    @staticmethod
-    async def async_iterable(it):
-        for msg in it:
-            await sleep(0.01)
-            yield msg
-
     async def distribute_messages(self, key, it, kwargs):
-        if isinstance(it, AsyncIterable):
-            async for msg in it:
-                for h in self.handlers[key]:
-                    h(msg=msg, kwargs=kwargs)
-        else:
-            async for msg in Conf.async_iterable(it):
-                for h in self.handlers[key]:
-                    h(msg=msg, kwargs=kwargs)
+        async for msg in it:
+            for h in self.handlers[key]:
+                h(msg=msg, kwargs=kwargs)
 
     def __init__(self, conf: dict = {}) -> None:
         """Define init behavior."""
@@ -114,7 +103,7 @@ class Topic:
 
 
 def handle(
-    *iterable: Union[Iterable, AsyncIterable],
+    *iterable: AsyncIterable,
     sink: Iterable[Callable[..., None]] = []
 ):
     c = Conf()
