@@ -37,6 +37,18 @@ dev = [
   "bandit",
   "pre-commit",
 ]
+test = [
+  "pytest",
+  "pytest-cov",
+  "pytest-mock",
+  "testcontainers[kafka]",
+]
+docs = [
+  "sphinx",
+  "sphinx-rtd-theme",
+  "sphinx-autoapi",
+  "sphinx-autobuild",
+]
 
 [project.urls]
 repository = "https://github.com/Menziess/slipstream"

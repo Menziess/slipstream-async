@@ -8,6 +8,9 @@ from typing import Any, Callable, Iterable
 
 from aiokafka import AIOKafkaConsumer
 
+READ_FROM_START = -2
+READ_FROM_END = -1
+
 
 class Singleton(type):
     """Maintain a single instance of a class."""
