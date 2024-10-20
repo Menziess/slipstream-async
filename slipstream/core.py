@@ -7,7 +7,6 @@ from re import sub
 from typing import Any, Callable, Iterable, Union
 
 from aiokafka import AIOKafkaConsumer
-from pubsub import pub
 
 
 class Singleton(type):
@@ -31,16 +30,31 @@ class Singleton(type):
 
 
 class Conf(metaclass=Singleton):
-    iterables: set[tuple[str, Iterable]] = set()
+    iterables: set[tuple[str, Union[Iterable, AsyncIterable]]] = set()
+    handlers: dict[str, set[Callable[..., None]]] = {}
 
-    def register_iterables(self, *it):
-        """Add iterables to global Conf."""
-        self.iterables.add(*it)
+    def register_iterable(
+        self,
+        key: str,
+        it: Union[Iterable, AsyncIterable]
+    ):
+        """Add iterable to global Conf."""
+        self.iterables.add((key, it))
+
+    def register_handler(
+        self,
+        key: str,
+        handler: Callable[..., None]
+    ):
+        """Add handler to global Conf."""
+        handlers = self.handlers.get(key, set())
+        handlers.add(handler)
+        self.handlers[key] = handlers
 
     async def start(self, **kwargs):
         await gather(*[
-            self.distribute_messages(it, kwargs)
-            for _, it in self.iterables]
+            self.distribute_messages(key, it, kwargs)
+            for key, it in self.iterables]
         )
 
     @staticmethod
@@ -49,15 +63,15 @@ class Conf(metaclass=Singleton):
             await sleep(0.01)
             yield msg
 
-    @staticmethod
-    async def distribute_messages(it, kwargs):
-        iterable_key = str(id(it))
+    async def distribute_messages(self, key, it, kwargs):
         if isinstance(it, AsyncIterable):
             async for msg in it:
-                pub.sendMessage(iterable_key, msg=msg, kwargs=kwargs)
+                for h in self.handlers[key]:
+                    h(msg=msg, kwargs=kwargs)
         else:
             async for msg in Conf.async_iterable(it):
-                pub.sendMessage(iterable_key, msg=msg, kwargs=kwargs)
+                for h in self.handlers[key]:
+                    h(msg=msg, kwargs=kwargs)
 
     def __init__(self, conf: dict = {}) -> None:
         """Define init behavior."""
@@ -120,8 +134,8 @@ def handle(
 
         for it in iterable:
             iterable_key = str(id(it))
-            c.register_iterables((iterable_key, it))
-            pub.subscribe(_handler, iterable_key)
+            c.register_iterable(iterable_key, it)
+            c.register_handler(iterable_key, _handler)
         return _handler
 
     return _deco
