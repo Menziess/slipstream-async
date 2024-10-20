@@ -1,35 +1,20 @@
 """Core module."""
 
+import logging
 from asyncio import gather
 from collections.abc import AsyncIterable
 from inspect import signature
 from re import sub
 from typing import Any, Callable, Iterable
 
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
+from slipstream.utils import Singleton, get_params_names
 
 READ_FROM_START = -2
 READ_FROM_END = -1
 
-
-class Singleton(type):
-    """Maintain a single instance of a class."""
-
-    _instances: dict['Singleton', Any] = {}
-
-    def __init__(cls, name, bases, dct):
-        """Perform checks before instantiation."""
-        if '__update__' not in dct:
-            raise TypeError('Expected __update__.')
-
-    def __call__(cls, *args, **kwargs):
-        """Apply metaclass singleton action."""
-        if cls not in cls._instances:
-            cls._instances[cls] = super(
-                Singleton, cls).__call__(*args, **kwargs)
-        instance = cls._instances[cls]
-        instance.__update__(*args, **kwargs)
-        return instance
+logger = logging.getLogger(__name__)
 
 
 class Conf(metaclass=Singleton):
@@ -84,18 +69,51 @@ class Conf(metaclass=Singleton):
 
 class Topic:
 
-    def __init__(self, bootstrap_servers, topic, group_id):
-        self.bootstrap_servers = bootstrap_servers
-        self.topic = topic
-        self.group_id = group_id
+    def __init__(
+        self,
+        name: str,
+        conf: dict = {},
+    ):
+        c = Conf()
+        self.name = name
+        self.conf = {**c.conf, **conf}
+        self._producer = None
+        self._consumer = None
+
+    def get_consumer(self):
+        if not self._consumer:
+            params = get_params_names(AIOKafkaConsumer)
+            self.consumer = AIOKafkaConsumer(self.name, **{
+                k: v
+                for k, v in self.conf.items()
+                if k in params
+            })
+        return self.consumer
+
+    def get_producer(self):
+        if not self._producer:
+            params = get_params_names(AIOKafkaProducer)
+            self._producer = AIOKafkaProducer(**{
+                k: v
+                for k, v in self.conf.items()
+                if k in params
+            })
+        return self._producer
+
+    async def __call__(self, key, value):
+        p = self.get_producer()
+        await p.start()
+        try:
+            await p.send_and_wait(
+                self.name,
+                key=key,
+                value=value,
+            )
+        finally:
+            await p.stop()
 
     async def __aiter__(self):
-        consumer = AIOKafkaConsumer(
-            self.topic,
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.group_id,
-            auto_offset_reset='earliest'
-        )
+        consumer = self.get_consumer()
         if consumer:
             await consumer.start()
         try:
@@ -103,6 +121,10 @@ class Topic:
                 yield msg
         finally:
             await consumer.stop()
+
+    async def __next__(self):
+        iterator = self.__aiter__()
+        return await anext(iterator)
 
 
 def handle(
