@@ -38,11 +38,16 @@ class Conf(metaclass=Singleton):
     {'bootstrap_servers': 'localhost:29091'}
     """
 
+    topics: list['Topic'] = []
     iterables: set[tuple[str, AsyncIterable]] = set()
     handlers: dict[str, set[Union[
         Callable[..., Awaitable[None]],
         Callable[..., None]
     ]]] = {}
+
+    def register_topic(self, topic: 'Topic'):
+        """Add topic to global conf."""
+        self.topics.append(topic)
 
     def register_iterable(
         self,
@@ -66,10 +71,17 @@ class Conf(metaclass=Singleton):
         self.handlers[key] = handlers
 
     async def _start(self, **kwargs):
-        await gather(*[
-            self._distribute_messages(key, it, kwargs)
-            for key, it in self.iterables]
-        )
+        try:
+            await gather(*[
+                self._distribute_messages(key, it, kwargs)
+                for key, it in self.iterables]
+            )
+        finally:
+            await self._shutdown()
+
+    async def _shutdown(self) -> None:
+        for t in self.topics:
+            await t._shutdown()
 
     async def _distribute_messages(self, key, it, kwargs):
         async for msg in it:
@@ -121,6 +133,7 @@ class Topic:
     ):
         """Create topic instance to produce and consume messages."""
         c = Conf()
+        c.register_topic(self)
         self.name = name
         self.conf = {**c.conf, **conf}
         self.codec = codec
@@ -180,7 +193,7 @@ class Topic:
         iterator = self.__aiter__()
         return await anext(iterator)
 
-    async def __del__(self):
+    async def _shutdown(self):
         """Cleanup and finalization."""
         if self.consumer:
             await self.consumer.stop()
