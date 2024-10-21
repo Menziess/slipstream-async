@@ -1,10 +1,19 @@
 """Slipstream utilities."""
 
 import logging
+from asyncio import iscoroutinefunction
 from inspect import signature
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
+
+
+def iscoroutinecallable(o: Any) -> bool:
+    """Checks whether function is coroutine."""
+    return iscoroutinefunction(o) or (
+        hasattr(o, '__call__')
+        and iscoroutinefunction(o.__call__)
+    )
 
 
 def get_params_names(o: Any):

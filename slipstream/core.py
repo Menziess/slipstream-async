@@ -13,12 +13,13 @@ from typing import (
     Generator,
     Iterable,
     Optional,
+    Union,
 )
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord
 
 from slipstream.codecs import ICodec
-from slipstream.utils import Singleton, get_params_names
+from slipstream.utils import Singleton, get_params_names, iscoroutinecallable
 
 KAFKA_CLASSES_PARAMS = {
     **get_params_names(AIOKafkaConsumer),
@@ -38,7 +39,10 @@ class Conf(metaclass=Singleton):
     """
 
     iterables: set[tuple[str, AsyncIterable]] = set()
-    handlers: dict[str, set[Callable[..., Awaitable[None]]]] = {}
+    handlers: dict[str, set[Union[
+        Callable[..., Awaitable[None]],
+        Callable[..., None]
+    ]]] = {}
 
     def register_iterable(
         self,
@@ -51,7 +55,10 @@ class Conf(metaclass=Singleton):
     def register_handler(
         self,
         key: str,
-        handler: Callable[..., Awaitable[None]]
+        handler: Union[
+            Callable[..., Awaitable[None]],
+            Callable[..., None]
+        ]
     ):
         """Add handler to global Conf."""
         handlers = self.handlers.get(key, set())
@@ -67,7 +74,7 @@ class Conf(metaclass=Singleton):
     async def _distribute_messages(self, key, it, kwargs):
         async for msg in it:
             for h in self.handlers[key]:
-                await h(msg=msg, kwargs=kwargs)
+                await h(msg=msg, kwargs=kwargs)  # type: ignore
 
     def __init__(self, conf: dict = {}) -> None:
         """Define init behavior."""
@@ -181,37 +188,39 @@ class Topic:
             await self.producer.stop()
 
 
-async def _sink_output(s: Callable[..., Awaitable[None]], output: Any) -> None:
-    if isinstance(output, tuple):
-        key, value = output
-        await s(key=key, value=value)
-    else:
-        await s(key=None, value=output)
-
-
-async def _handle_generator_or_value(
-    sink: Iterable[Callable[..., Awaitable[None]]],
+async def _sink_output(
+    s: Union[
+        Callable[..., Awaitable[None]],
+        Callable[..., None]
+    ],
     output: Any
 ) -> None:
-    if isinstance(output, Generator):
-        for val in output:
-            for s in sink:
-                await _sink_output(s, val)
+    is_coroutine = iscoroutinecallable(s)
+    if isinstance(output, tuple):
+        key, value = output
+        if is_coroutine:
+            await s(key, value)  # type: ignore
+        else:
+            s(key, value)
     else:
-        for s in sink:
-            await _sink_output(s, output)
+        if is_coroutine:
+            await s(None, output)  # type: ignore
+        else:
+            s(None, output)
 
 
 def handle(
     *iterable: AsyncIterable,
-    sink: Iterable[Callable[..., Awaitable[None]]] = []
+    sink: Iterable[Union[
+        Callable[..., Awaitable[None]],
+        Callable[..., None]]
+    ] = []
 ):
     """Snaps function to stream.
 
-    TODO: not finished.
     Ex:
-        >>> topic = Topic('demo')               # doctest: +SKIP
-        >>> cache = Cache('state/demo')         # doctest: +SKIP
+        >>> topic = Topic('demo')                 # doctest: +SKIP
+        >>> cache = Cache('state/demo')           # doctest: +SKIP
 
         >>> @handle(topic, sink=[print, cache])   # doctest: +SKIP
         ... def handler(msg, **kwargs):
@@ -220,16 +229,24 @@ def handle(
     c = Conf()
 
     def _deco(f):
-        async def _handler(msg, kwargs={}):
-            parameters = signature(f).parameters.values()
-            if any(p.kind == p.VAR_KEYWORD for p in parameters):
-                output = f(msg, **kwargs)
-            elif parameters:
-                output = f(msg)
-            else:
-                output = f()
+        parameters = signature(f).parameters.values()
+        is_coroutine = iscoroutinecallable(f)
 
-            await _handle_generator_or_value(sink, output)
+        async def _handler(msg, kwargs={}):
+            if is_coroutine:
+                if any(p.kind == p.VAR_KEYWORD for p in parameters):
+                    output = await f(msg, **kwargs)
+                else:
+                    output = await f(msg) if parameters else await f()
+            else:
+                if any(p.kind == p.VAR_KEYWORD for p in parameters):
+                    output = f(msg, **kwargs)
+                else:
+                    output = f(msg) if parameters else f()
+
+            for val in output if isinstance(output, Generator) else [output]:
+                for s in sink:
+                    await _sink_output(s, val)
 
         for it in iterable:
             iterable_key = str(id(it))
