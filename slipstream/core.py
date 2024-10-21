@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 
 class Conf(metaclass=Singleton):
+    """Define default kafka configuration, optionally.
+
+    >>> Conf({'bootstrap_servers': 'localhost:29091'})
+    {'bootstrap_servers': 'localhost:29091'}
+    """
+
     iterables: set[tuple[str, AsyncIterable]] = set()
     handlers: dict[str, set[Callable[..., Awaitable[None]]]] = {}
 
@@ -52,13 +58,13 @@ class Conf(metaclass=Singleton):
         handlers.add(handler)
         self.handlers[key] = handlers
 
-    async def start(self, **kwargs):
+    async def _start(self, **kwargs):
         await gather(*[
-            self.distribute_messages(key, it, kwargs)
+            self._distribute_messages(key, it, kwargs)
             for key, it in self.iterables]
         )
 
-    async def distribute_messages(self, key, it, kwargs):
+    async def _distribute_messages(self, key, it, kwargs):
         async for msg in it:
             for h in self.handlers[key]:
                 await h(msg=msg, kwargs=kwargs)
@@ -81,6 +87,23 @@ class Conf(metaclass=Singleton):
 
 
 class Topic:
+    """Act as a consumer and producer.
+
+    >>> topic = Topic('emoji', {
+    ...     'bootstrap_servers': 'localhost:29091',
+    ...     'auto_offset_reset': 'earliest',
+    ...     'group_id': 'demo',
+    ... })
+
+    Loop over topic (iterable) to consume from it:
+
+    >>> async for msg in topic:               # doctest: +SKIP
+    ...     print(msg.value)
+
+    Call topic (callable) with data to produce to it:
+
+    >>> await topic({'msg': 'Hello World!'})  # doctest: +SKIP
+    """
 
     def __init__(
         self,
@@ -89,6 +112,7 @@ class Topic:
         offset: Optional[int] = None,
         codec: Optional[ICodec] = None,
     ):
+        """Create topic instance to produce and consume messages."""
         c = Conf()
         self.name = name
         self.conf = {**c.conf, **conf}
@@ -182,6 +206,17 @@ def handle(
     *iterable: AsyncIterable,
     sink: Iterable[Callable[..., Awaitable[None]]] = []
 ):
+    """Snaps function to stream.
+
+    TODO: not finished.
+    Ex:
+        >>> topic = Topic('demo')               # doctest: +SKIP
+        >>> cache = Cache('state/demo')         # doctest: +SKIP
+
+        >>> @handle(topic, sink=[print, cache])   # doctest: +SKIP
+        ... def handler(msg, **kwargs):
+        ...     return msg.key, msg.value
+    """
     c = Conf()
 
     def _deco(f):
@@ -205,5 +240,14 @@ def handle(
     return _deco
 
 
-def stream():
-    return Conf().start()
+def stream(**kwargs):
+    """Start the streams.
+
+    Ex:
+        >>> from asyncio import run
+        >>> args = {
+        ...     'env': 'DEV',
+        ... }
+        >>> run(stream(**args))
+    """
+    return Conf()._start(**kwargs)
