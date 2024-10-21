@@ -20,6 +20,10 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord
 from slipstream.codecs import ICodec
 from slipstream.utils import Singleton, get_params_names
 
+KAFKA_CLASSES_PARAMS = {
+    **get_params_names(AIOKafkaConsumer),
+    **get_params_names(AIOKafkaProducer),
+}
 READ_FROM_START = -2
 READ_FROM_END = -1
 
@@ -92,6 +96,10 @@ class Topic:
         self.starting_offset = offset
         self.consumer: Optional[AIOKafkaConsumer] = None
         self.producer: Optional[AIOKafkaProducer] = None
+
+        if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
+            logger.warning(
+                f'Unexpected Topic {self.name} conf entries: {",".join(diff)}')
 
     async def get_consumer(self):
         """Get started instance of Kafka consumer."""
