@@ -69,6 +69,13 @@ include = ["slipstream*"]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+
 [tool.ruff]
 line-length = 79
 
