@@ -5,9 +5,9 @@ from asyncio import gather
 from collections.abc import AsyncIterable
 from inspect import signature
 from re import sub
-from typing import Any, Callable, Iterable
+from typing import Any, AsyncIterator, Callable, Iterable, Optional
 
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord
 
 from slipstream.utils import Singleton, get_params_names
 
@@ -77,54 +77,59 @@ class Topic:
         c = Conf()
         self.name = name
         self.conf = {**c.conf, **conf}
-        self._producer = None
-        self._consumer = None
+        self.consumer: Optional[AIOKafkaConsumer] = None
+        self.producer: Optional[AIOKafkaProducer] = None
 
-    def get_consumer(self):
-        if not self._consumer:
-            params = get_params_names(AIOKafkaConsumer)
-            self.consumer = AIOKafkaConsumer(self.name, **{
-                k: v
-                for k, v in self.conf.items()
-                if k in params
-            })
-        return self.consumer
+    async def get_consumer(self):
+        """Get started instance of Kafka consumer."""
+        params = get_params_names(AIOKafkaConsumer)
+        consumer = AIOKafkaConsumer(self.name, **{
+            k: v
+            for k, v in self.conf.items()
+            if k in params
+        })
+        await consumer.start()
+        return consumer
 
-    def get_producer(self):
-        if not self._producer:
-            params = get_params_names(AIOKafkaProducer)
-            self._producer = AIOKafkaProducer(**{
-                k: v
-                for k, v in self.conf.items()
-                if k in params
-            })
-        return self._producer
+    async def get_producer(self):
+        """Get started instance of Kafka producer."""
+        params = get_params_names(AIOKafkaProducer)
+        producer = AIOKafkaProducer(**{
+            k: v
+            for k, v in self.conf.items()
+            if k in params
+        })
+        await producer.start()
+        return producer
 
-    async def __call__(self, key, value):
-        p = self.get_producer()
-        await p.start()
-        try:
-            await p.send_and_wait(
-                self.name,
-                key=key,
-                value=value,
-            )
-        finally:
-            await p.stop()
+    async def __call__(self, key, value) -> None:
+        """Produce message to topic."""
+        if not self.producer:
+            self.producer = await self.get_producer()
+        await self.producer.send_and_wait(
+            self.name,
+            key=key,
+            value=value,
+        )
 
-    async def __aiter__(self):
-        consumer = self.get_consumer()
-        if consumer:
-            await consumer.start()
-        try:
-            async for msg in consumer:
-                yield msg
-        finally:
-            await consumer.stop()
+    async def __aiter__(self) -> AsyncIterator[ConsumerRecord]:
+        """Iterate over messages from topic."""
+        if not self.consumer:
+            self.consumer = await self.get_consumer()
+        async for msg in self.consumer:
+            yield msg
 
     async def __next__(self):
+        """Get the next message from topic."""
         iterator = self.__aiter__()
         return await anext(iterator)
+
+    async def __del__(self):
+        """Cleanup and finalization."""
+        if self.consumer:
+            await self.consumer.stop()
+        if self.producer:
+            await self.producer.stop()
 
 
 def handle(
