@@ -48,7 +48,7 @@ class Cache:
     ) -> None:
         """Create instance that holds rocksdb reference.
 
-        This configuration setup optimizes for low disk usage (25mb per table/cf).
+        This configuration setup optimizes for low disk usage (25mb per table).
         The oldest records may be removed during compaction.
 
         https://congyuwang.github.io/RocksDict/rocksdict.html
@@ -152,7 +152,8 @@ class Cache:
 
     def get(
         self,
-        key: Union[str, int, float, bytes, bool, List[Union[str, int, float, bytes, bool]]],
+        key: Union[str, int, float, bytes, bool, List[
+            Union[str, int, float, bytes, bool]]],
         default: Any = None,
         read_opt: Union[ReadOptions, None] = None
     ) -> Optional[Any]:
@@ -237,7 +238,11 @@ class Cache:
         """Drop column family by name."""
         return self.db.drop_column_family(name)
 
-    def create_column_family(self, name: str, options: Options = Options()) -> Rdict:
+    def create_column_family(
+        self,
+        name: str,
+        options: Options = Options()
+    ) -> Rdict:
         """Craete column family."""
         return self.db.create_column_family(name, options)
 

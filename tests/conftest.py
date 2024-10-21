@@ -9,7 +9,7 @@ from testcontainers.kafka import KafkaContainer
 
 from slipstream import Cache
 
-KAFKA_CONTAINER = 'confluentinc/cp-kafka:7.6.1'
+KAFKA_CONTAINER = 'confluentinc/cp-kafka:latest'
 
 
 @fixture

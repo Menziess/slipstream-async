@@ -8,17 +8,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def deserialize_json(msg: bytes) -> dict:
-    """Deserialize json message."""
-    return loads(msg.decode())
-
-
-def serialize_json(msg: dict) -> bytes:
-    """Serialize json message."""
-    dumped = dumps(msg, default=str)
-    return dumped.encode()
-
-
 class ICodec(metaclass=ABCMeta):
     """Base class for codecs."""
 
@@ -38,8 +27,8 @@ class JsonCodec(ICodec):
 
     def encode(self, obj: Any) -> bytes:
         """Serialize message."""
-        return serialize_json(obj)
+        return dumps(obj, default=str).encode()
 
     def decode(self, s: bytes) -> object:
         """Deserialize message."""
-        return deserialize_json(s)
+        return loads(s.decode())
