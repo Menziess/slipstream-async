@@ -5,10 +5,19 @@ from asyncio import gather
 from collections.abc import AsyncIterable
 from inspect import signature
 from re import sub
-from typing import Any, AsyncIterator, Callable, Iterable, Optional
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generator,
+    Iterable,
+    Optional,
+)
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord
 
+from slipstream.codecs import ICodec
 from slipstream.utils import Singleton, get_params_names
 
 READ_FROM_START = -2
@@ -19,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class Conf(metaclass=Singleton):
     iterables: set[tuple[str, AsyncIterable]] = set()
-    handlers: dict[str, set[Callable[..., None]]] = {}
+    handlers: dict[str, set[Callable[..., Awaitable[None]]]] = {}
 
     def register_iterable(
         self,
@@ -32,7 +41,7 @@ class Conf(metaclass=Singleton):
     def register_handler(
         self,
         key: str,
-        handler: Callable[..., None]
+        handler: Callable[..., Awaitable[None]]
     ):
         """Add handler to global Conf."""
         handlers = self.handlers.get(key, set())
@@ -48,7 +57,7 @@ class Conf(metaclass=Singleton):
     async def distribute_messages(self, key, it, kwargs):
         async for msg in it:
             for h in self.handlers[key]:
-                h(msg=msg, kwargs=kwargs)
+                await h(msg=msg, kwargs=kwargs)
 
     def __init__(self, conf: dict = {}) -> None:
         """Define init behavior."""
@@ -73,16 +82,22 @@ class Topic:
         self,
         name: str,
         conf: dict = {},
+        offset: Optional[int] = None,
+        codec: Optional[ICodec] = None,
     ):
         c = Conf()
         self.name = name
         self.conf = {**c.conf, **conf}
+        self.codec = codec
+        self.starting_offset = offset
         self.consumer: Optional[AIOKafkaConsumer] = None
         self.producer: Optional[AIOKafkaProducer] = None
 
     async def get_consumer(self):
         """Get started instance of Kafka consumer."""
         params = get_params_names(AIOKafkaConsumer)
+        if self.codec:
+            self.conf['value_deserializer'] = self.codec.decode
         consumer = AIOKafkaConsumer(self.name, **{
             k: v
             for k, v in self.conf.items()
@@ -94,6 +109,8 @@ class Topic:
     async def get_producer(self):
         """Get started instance of Kafka producer."""
         params = get_params_names(AIOKafkaProducer)
+        if self.codec:
+            self.conf['value_serializer'] = self.codec.encode
         producer = AIOKafkaProducer(**{
             k: v
             for k, v in self.conf.items()
@@ -132,14 +149,35 @@ class Topic:
             await self.producer.stop()
 
 
+async def _sink_output(s: Callable[..., Awaitable[None]], output: Any) -> None:
+    if isinstance(output, tuple):
+        key, value = output
+        await s(key=key, value=value)
+    else:
+        await s(key=None, value=output)
+
+
+async def _handle_generator_or_value(
+    sink: Iterable[Callable[..., Awaitable[None]]],
+    output: Any
+) -> None:
+    if isinstance(output, Generator):
+        for val in output:
+            for s in sink:
+                await _sink_output(s, val)
+    else:
+        for s in sink:
+            await _sink_output(s, output)
+
+
 def handle(
     *iterable: AsyncIterable,
-    sink: Iterable[Callable[..., None]] = []
+    sink: Iterable[Callable[..., Awaitable[None]]] = []
 ):
     c = Conf()
 
     def _deco(f):
-        def _handler(msg, kwargs={}):
+        async def _handler(msg, kwargs={}):
             parameters = signature(f).parameters.values()
             if any(p.kind == p.VAR_KEYWORD for p in parameters):
                 output = f(msg, **kwargs)
@@ -148,8 +186,7 @@ def handle(
             else:
                 output = f()
 
-            for s in sink:
-                s(output)
+            await _handle_generator_or_value(sink, output)
 
         for it in iterable:
             iterable_key = str(id(it))
