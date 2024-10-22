@@ -16,7 +16,12 @@ from typing import (
     Union,
 )
 
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord
+from aiokafka import (
+    AIOKafkaClient,
+    AIOKafkaConsumer,
+    AIOKafkaProducer,
+    ConsumerRecord,
+)
 
 from slipstream.caching import Cache
 from slipstream.codecs import ICodec
@@ -25,6 +30,7 @@ from slipstream.utils import Singleton, get_params_names, iscoroutinecallable
 KAFKA_CLASSES_PARAMS = {
     **get_params_names(AIOKafkaConsumer),
     **get_params_names(AIOKafkaProducer),
+    **get_params_names(AIOKafkaClient),
 }
 READ_FROM_START = -2
 READ_FROM_END = -1
@@ -151,6 +157,16 @@ class Topic:
         if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
             logger.warning(
                 f'Unexpected Topic {self.name} conf entries: {",".join(diff)}')
+
+    @property
+    async def admin(self) -> AIOKafkaClient:
+        """Get started instance of Kafka admin client."""
+        params = get_params_names(AIOKafkaClient)
+        return AIOKafkaClient(**{
+            k: v
+            for k, v in self.conf.items()
+            if k in params
+        })
 
     async def get_consumer(self):
         """Get started instance of Kafka consumer."""
