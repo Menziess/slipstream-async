@@ -5,6 +5,7 @@ import pytest
 from slipstream import Topic
 
 
+@pytest.mark.forked
 @pytest.mark.asyncio
 async def test_produce_consume(kafka):
     """Should be able to exchange messages with kafka."""

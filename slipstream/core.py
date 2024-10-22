@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import AbstractEventLoop, gather
+from asyncio import gather
 from collections.abc import AsyncIterable
 from inspect import signature
 from re import sub
@@ -135,7 +135,6 @@ class Topic:
         conf: dict = {},
         offset: Optional[int] = None,
         codec: Optional[ICodec] = None,
-        loop: Optional[AbstractEventLoop] = None,
     ):
         """Create topic instance to produce and consume messages."""
         c = Conf()
@@ -144,7 +143,6 @@ class Topic:
         self.conf = {**c.conf, **conf}
         self.starting_offset = offset
         self.codec = codec
-        self.loop = loop
 
         self.consumer: Optional[AIOKafkaConsumer] = None
         self.producer: Optional[AIOKafkaProducer] = None
@@ -158,7 +156,7 @@ class Topic:
         params = get_params_names(AIOKafkaConsumer)
         if self.codec:
             self.conf['value_deserializer'] = self.codec.decode
-        consumer = AIOKafkaConsumer(self.name, loop=self.loop, **{
+        consumer = AIOKafkaConsumer(self.name, **{
             k: v
             for k, v in self.conf.items()
             if k in params
@@ -171,7 +169,7 @@ class Topic:
         params = get_params_names(AIOKafkaProducer)
         if self.codec:
             self.conf['value_serializer'] = self.codec.encode
-        producer = AIOKafkaProducer(loop=self.loop, **{
+        producer = AIOKafkaProducer(**{
             k: v
             for k, v in self.conf.items()
             if k in params
