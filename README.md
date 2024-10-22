@@ -2,7 +2,7 @@
 
 # Slipstream
 
-<img src="https://raw.githubusercontent.com/menziess/slipstream/master/res/logo.png" width="25%" height="25%" align="right" />
+<img src="https://github.com/menziess/slipstream/raw/master/res/logo.png" width="25%" height="25%" align="right" />
 
 Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
