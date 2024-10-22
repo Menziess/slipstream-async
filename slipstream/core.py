@@ -85,7 +85,7 @@ class Conf(metaclass=Singleton):
 
     async def _distribute_messages(self, key, it, kwargs):
         async for msg in it:
-            for h in self.handlers[key]:
+            for h in self.handlers.get(key, []):
                 await h(msg=msg, kwargs=kwargs)  # type: ignore
 
     def __init__(self, conf: dict = {}) -> None:
