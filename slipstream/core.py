@@ -18,6 +18,7 @@ from typing import (
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord
 
+from slipstream.caching import Cache
 from slipstream.codecs import ICodec
 from slipstream.utils import Singleton, get_params_names, iscoroutinecallable
 
@@ -215,17 +216,22 @@ async def _sink_output(
     output: Any
 ) -> None:
     is_coroutine = iscoroutinecallable(s)
-    if isinstance(output, tuple):
-        key, value = output
-        if is_coroutine:
-            await s(key, value)  # type: ignore
+    if isinstance(s, Cache):
+        if not isinstance(output, tuple):
+            raise ValueError('Cache sink expects: Tuple[key, val].')
         else:
-            s(key, value)
+            if isinstance(s, Cache):
+                s(*output)
+    elif isinstance(s, Topic):
+        if not isinstance(output, tuple):
+            await s(b'', output)  # type: ignore
+        else:
+            await s(*output)  # type: ignore
     else:
         if is_coroutine:
-            await s(None, output)  # type: ignore
+            await s(output)  # type: ignore
         else:
-            s(None, output)
+            s(output)
 
 
 def handle(
