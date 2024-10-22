@@ -77,11 +77,11 @@ class Conf(metaclass=Singleton):
                 self._distribute_messages(key, it, kwargs)
                 for key, it in self.iterables
             ], return_exceptions=True)
-            if nr_errors := len(results):
-                logger.warning(f'Stream ended with {nr_errors}:')
-            for result in results:
-                if isinstance(result, Exception):
-                    logger.error(result)
+            errors = [_ for _ in results if isinstance(_, Exception)]
+            if nr_errors := len(errors):
+                logger.warning(f'Stream ended with {nr_errors} errors:')
+            for error in errors:
+                logger.error(error)
         finally:
             await self._shutdown()
 
