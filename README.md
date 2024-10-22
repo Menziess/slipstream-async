@@ -21,22 +21,17 @@ The `handle` decorator snaps asynchronous iterables to user functions, and start
 We pass the callable `print` to print out the return value. Multiple iterables and sinks can be passed.
 
 ```py
-from asyncio import run, sleep
-from time import strftime
+from asyncio import run
 
 from slipstream import handle, stream
 
+async def async_iterable(emoji):
+    for e in emoji:
+        yield e
 
-async def timer(interval=1.0):
-    while True:
-        yield strftime('%H:%M:%S')
-        await sleep(interval)
-
-
-@handle(timer(), sink=[print])
+@handle(async_iterable('🏆📞🐟👌'), sink=[print])
 def print_time(msg):
-    yield f'The time is: {msg}'
-
+    yield f'Emoji received: {msg}'
 
 if __name__ == '__main__':
     try:
@@ -46,10 +41,10 @@ if __name__ == '__main__':
 ```
 
 ```sh
-The time is: 21:39:11
-The time is: 21:39:12
-The time is: 21:39:13
-The time is: 21:39:14
+Emoji received: 🏆
+Emoji received: 📞
+Emoji received: 🐟
+Emoji received: 👌
 ```
 
 To try it out for yourself, spin up a local kafka broker with [docker-compose.yml](docker-compose.yml), using `localhost:29091` to connect:
