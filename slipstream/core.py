@@ -72,10 +72,15 @@ class Conf(metaclass=Singleton):
 
     async def _start(self, **kwargs):
         try:
-            await gather(*[
+            results = await gather(*[
                 self._distribute_messages(key, it, kwargs)
-                for key, it in self.iterables]
-            )
+                for key, it in self.iterables
+            ], return_exceptions=True)
+            if nr_errors := len(results):
+                logger.warning(f'Stream ended with {nr_errors}:')
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(result)
         finally:
             await self._shutdown()
 
