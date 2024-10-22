@@ -21,15 +21,18 @@ The `handle` decorator snaps asynchronous iterables to user functions, and start
 We pass the callable `print` to print out the return value. Multiple iterables and sinks can be passed.
 
 ```py
-from asyncio import run
+from asyncio import run, sleep
 
 from slipstream import handle, stream
 
 async def async_iterable(emoji):
     for e in emoji:
         yield e
+        await sleep(0.1)
 
-@handle(async_iterable('🏆📞🐟👌'), sink=[print])
+messages = async_iterable('🏆📞🐟👌')
+
+@handle(messages, sink=[print])
 def print_time(msg):
     yield f'Emoji received: {msg}'
 
