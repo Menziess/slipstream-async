@@ -19,13 +19,18 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-requires-python = ">=3.8.1"
+requires-python = ">=3.10"
 dependencies = [
-  "pypubsub >=4.0.3",
-  "aiokafka",
+  "uvloop",
 ]
 
 [project.optional-dependencies]
+kafka = [
+  "aiokafka",
+]
+cache = [
+  "rocksdict",
+]
 dev = [
   "pydocstyle",
   "autopep8",
@@ -33,6 +38,20 @@ dev = [
   "flake8",
   "bandit",
   "pre-commit",
+]
+test = [
+  "pytest",
+  "pytest-cov",
+  "pytest-mock",
+  "pytest-forked",
+  "pytest-asyncio",
+  "testcontainers[kafka]",
+]
+docs = [
+  "sphinx",
+  "sphinx-rtd-theme",
+  "sphinx-autoapi",
+  "sphinx-autobuild",
 ]
 
 [project.urls]
@@ -52,6 +71,13 @@ include = ["slipstream*"]
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.bandit]
+exclude_dirs = ["tests"]
 
 [tool.ruff]
 line-length = 79

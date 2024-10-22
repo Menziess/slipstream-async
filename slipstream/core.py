@@ -1,63 +1,98 @@
 """Core module."""
 
-from asyncio import gather, sleep
+import logging
+from asyncio import gather
 from collections.abc import AsyncIterable
 from inspect import signature
 from re import sub
-from typing import Any, Callable, Iterable, Union
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generator,
+    Iterable,
+    Optional,
+    Union,
+)
 
-from aiokafka import AIOKafkaConsumer
-from pubsub import pub
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord
 
+from slipstream.caching import Cache
+from slipstream.codecs import ICodec
+from slipstream.utils import Singleton, get_params_names, iscoroutinecallable
 
-class Singleton(type):
-    """Maintain a single instance of a class."""
+KAFKA_CLASSES_PARAMS = {
+    **get_params_names(AIOKafkaConsumer),
+    **get_params_names(AIOKafkaProducer),
+}
+READ_FROM_START = -2
+READ_FROM_END = -1
 
-    _instances: dict['Singleton', Any] = {}
-
-    def __init__(cls, name, bases, dct):
-        """Perform checks before instantiation."""
-        if '__update__' not in dct:
-            raise TypeError('Expected __update__.')
-
-    def __call__(cls, *args, **kwargs):
-        """Apply metaclass singleton action."""
-        if cls not in cls._instances:
-            cls._instances[cls] = super(
-                Singleton, cls).__call__(*args, **kwargs)
-        instance = cls._instances[cls]
-        instance.__update__(*args, **kwargs)
-        return instance
+logger = logging.getLogger(__name__)
 
 
 class Conf(metaclass=Singleton):
-    iterables: set[tuple[str, Iterable]] = set()
+    """Define default kafka configuration, optionally.
 
-    def register_iterables(self, *it):
-        """Add iterables to global Conf."""
-        self.iterables.add(*it)
+    >>> Conf({'bootstrap_servers': 'localhost:29091'})
+    {'bootstrap_servers': 'localhost:29091'}
+    """
 
-    async def start(self, **kwargs):
-        await gather(*[
-            self.distribute_messages(it, kwargs)
-            for _, it in self.iterables]
-        )
+    topics: list['Topic'] = []
+    iterables: set[tuple[str, AsyncIterable]] = set()
+    handlers: dict[str, set[Union[
+        Callable[..., Awaitable[None]],
+        Callable[..., None]
+    ]]] = {}
 
-    @staticmethod
-    async def async_iterable(it):
-        for msg in it:
-            await sleep(0.01)
-            yield msg
+    def register_topic(self, topic: 'Topic'):
+        """Add topic to global conf."""
+        self.topics.append(topic)
 
-    @staticmethod
-    async def distribute_messages(it, kwargs):
-        iterable_key = str(id(it))
-        if isinstance(it, AsyncIterable):
-            async for msg in it:
-                pub.sendMessage(iterable_key, msg=msg, kwargs=kwargs)
-        else:
-            async for msg in Conf.async_iterable(it):
-                pub.sendMessage(iterable_key, msg=msg, kwargs=kwargs)
+    def register_iterable(
+        self,
+        key: str,
+        it: AsyncIterable
+    ):
+        """Add iterable to global Conf."""
+        self.iterables.add((key, it))
+
+    def register_handler(
+        self,
+        key: str,
+        handler: Union[
+            Callable[..., Awaitable[None]],
+            Callable[..., None]
+        ]
+    ):
+        """Add handler to global Conf."""
+        handlers = self.handlers.get(key, set())
+        handlers.add(handler)
+        self.handlers[key] = handlers
+
+    async def _start(self, **kwargs):
+        try:
+            results = await gather(*[
+                self._distribute_messages(key, it, kwargs)
+                for key, it in self.iterables
+            ], return_exceptions=True)
+            errors = [_ for _ in results if isinstance(_, Exception)]
+            if nr_errors := len(errors):
+                logger.warning(f'Stream ended with {nr_errors} errors:')
+            for error in errors:
+                logger.error(error)
+        finally:
+            await self._shutdown()
+
+    async def _shutdown(self) -> None:
+        for t in self.topics:
+            await t._shutdown()
+
+    async def _distribute_messages(self, key, it, kwargs):
+        async for msg in it:
+            for h in self.handlers.get(key, []):
+                await h(msg=msg, kwargs=kwargs)  # type: ignore
 
     def __init__(self, conf: dict = {}) -> None:
         """Define init behavior."""
@@ -77,55 +112,184 @@ class Conf(metaclass=Singleton):
 
 
 class Topic:
+    """Act as a consumer and producer.
 
-    def __init__(self, bootstrap_servers, topic, group_id):
-        self.bootstrap_servers = bootstrap_servers
-        self.topic = topic
-        self.group_id = group_id
+    >>> topic = Topic('emoji', {
+    ...     'bootstrap_servers': 'localhost:29091',
+    ...     'auto_offset_reset': 'earliest',
+    ...     'group_id': 'demo',
+    ... })
 
-    async def __aiter__(self):
-        consumer = AIOKafkaConsumer(
-            self.topic,
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.group_id,
-            auto_offset_reset='earliest'
+    Loop over topic (iterable) to consume from it:
+
+    >>> async for msg in topic:               # doctest: +SKIP
+    ...     print(msg.value)
+
+    Call topic (callable) with data to produce to it:
+
+    >>> await topic({'msg': 'Hello World!'})  # doctest: +SKIP
+    """
+
+    def __init__(
+        self,
+        name: str,
+        conf: dict = {},
+        offset: Optional[int] = None,
+        codec: Optional[ICodec] = None,
+    ):
+        """Create topic instance to produce and consume messages."""
+        c = Conf()
+        c.register_topic(self)
+        self.name = name
+        self.conf = {**c.conf, **conf}
+        self.starting_offset = offset
+        self.codec = codec
+
+        self.consumer: Optional[AIOKafkaConsumer] = None
+        self.producer: Optional[AIOKafkaProducer] = None
+
+        if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
+            logger.warning(
+                f'Unexpected Topic {self.name} conf entries: {",".join(diff)}')
+
+    async def get_consumer(self):
+        """Get started instance of Kafka consumer."""
+        params = get_params_names(AIOKafkaConsumer)
+        if self.codec:
+            self.conf['value_deserializer'] = self.codec.decode
+        consumer = AIOKafkaConsumer(self.name, **{
+            k: v
+            for k, v in self.conf.items()
+            if k in params
+        })
+        await consumer.start()
+        return consumer
+
+    async def get_producer(self):
+        """Get started instance of Kafka producer."""
+        params = get_params_names(AIOKafkaProducer)
+        if self.codec:
+            self.conf['value_serializer'] = self.codec.encode
+        producer = AIOKafkaProducer(**{
+            k: v
+            for k, v in self.conf.items()
+            if k in params
+        })
+        await producer.start()
+        return producer
+
+    async def __call__(self, key, value) -> None:
+        """Produce message to topic."""
+        if not self.producer:
+            self.producer = await self.get_producer()
+        await self.producer.send_and_wait(
+            self.name,
+            key=key,
+            value=value,
         )
-        if consumer:
-            await consumer.start()
-        try:
-            async for msg in consumer:
-                yield msg
-        finally:
-            await consumer.stop()
+
+    async def __aiter__(self) -> AsyncIterator[ConsumerRecord]:
+        """Iterate over messages from topic."""
+        if not self.consumer:
+            self.consumer = await self.get_consumer()
+        async for msg in self.consumer:
+            yield msg
+
+    async def __next__(self):
+        """Get the next message from topic."""
+        iterator = self.__aiter__()
+        return await anext(iterator)
+
+    async def _shutdown(self):
+        """Cleanup and finalization."""
+        if self.consumer:
+            await self.consumer.stop()
+        if self.producer:
+            await self.producer.stop()
 
 
-def slap(
-    *iterable: Union[Iterable, AsyncIterable],
-    sink: Iterable[Callable[..., None]] = []
+async def _sink_output(
+    s: Union[
+        Callable[..., Awaitable[None]],
+        Callable[..., None]
+    ],
+    output: Any
+) -> None:
+    is_coroutine = iscoroutinecallable(s)
+    if isinstance(s, Cache):
+        if not isinstance(output, tuple):
+            raise ValueError('Cache sink expects: Tuple[key, val].')
+        else:
+            if isinstance(s, Cache):
+                s(*output)
+    elif isinstance(s, Topic):
+        if not isinstance(output, tuple):
+            await s(b'', output)  # type: ignore
+        else:
+            await s(*output)  # type: ignore
+    else:
+        if is_coroutine:
+            await s(output)  # type: ignore
+        else:
+            s(output)
+
+
+def handle(
+    *iterable: AsyncIterable,
+    sink: Iterable[Union[
+        Callable[..., Awaitable[None]],
+        Callable[..., None]]
+    ] = []
 ):
+    """Snaps function to stream.
+
+    Ex:
+        >>> topic = Topic('demo')                 # doctest: +SKIP
+        >>> cache = Cache('state/demo')           # doctest: +SKIP
+
+        >>> @handle(topic, sink=[print, cache])   # doctest: +SKIP
+        ... def handler(msg, **kwargs):
+        ...     return msg.key, msg.value
+    """
     c = Conf()
 
     def _deco(f):
-        def _handler(msg, kwargs={}):
-            parameters = signature(f).parameters.values()
-            if any(p.kind == p.VAR_KEYWORD for p in parameters):
-                output = f(msg, **kwargs)
-            elif parameters:
-                output = f(msg)
-            else:
-                output = f()
+        parameters = signature(f).parameters.values()
+        is_coroutine = iscoroutinecallable(f)
 
-            for s in sink:
-                s(output)
+        async def _handler(msg, kwargs={}):
+            if is_coroutine:
+                if any(p.kind == p.VAR_KEYWORD for p in parameters):
+                    output = await f(msg, **kwargs)
+                else:
+                    output = await f(msg) if parameters else await f()
+            else:
+                if any(p.kind == p.VAR_KEYWORD for p in parameters):
+                    output = f(msg, **kwargs)
+                else:
+                    output = f(msg) if parameters else f()
+
+            for val in output if isinstance(output, Generator) else [output]:
+                for s in sink:
+                    await _sink_output(s, val)
 
         for it in iterable:
             iterable_key = str(id(it))
-            c.register_iterables((iterable_key, it))
-            pub.subscribe(_handler, iterable_key)
+            c.register_iterable(iterable_key, it)
+            c.register_handler(iterable_key, _handler)
         return _handler
 
     return _deco
 
 
-def stream():
-    return Conf().start()
+def stream(**kwargs):
+    """Start the streams.
+
+    Ex:
+        >>> from asyncio import run
+        >>> args = {
+        ...     'env': 'DEV',
+        ... }
+        >>> run(stream(**args))
+    """
+    return Conf()._start(**kwargs)
