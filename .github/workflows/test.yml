@@ -25,6 +25,22 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Create virtualenv
+        run: |
+          python -m venv .venv
+
+      - name: Activate virtualenv unix
+        if: ${{ inputs.os == 'ubuntu-latest' || inputs.os == 'macos-latest' }}
+        run: |
+          . .venv/bin/activate
+          echo PATH=$PATH >> $GITHUB_ENV
+
+      - name: Activate virtualenv windows
+        if: ${{ inputs.os == 'windows-latest' }}
+        run: |
+          .\.venv\Scripts\Activate.ps1
+          echo "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Install package
         run: |
           pip install .[dev,test,kafka,cache]
