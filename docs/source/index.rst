@@ -46,7 +46,7 @@ Install using ``pip``::
 Kafka
 -----
 
-Install ``aiokafka`` separately or along with slipstream::
+Install ``aiokafka`` separately or along with slipstream (unpinned)::
 
     pip install slipstream[kafka]
 
