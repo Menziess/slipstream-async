@@ -1,0 +1,29 @@
+name: Upload Python Package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Get latest tag
+        id: get_tag
+        run: echo "::set-output name=tag::$(git describe --abbrev=0 --tags)"
+
+      - name: Set package version
+        run: echo "PACKAGE_VERSION=${{ steps.get_tag.outputs.tag }}" >> $GITHUB_ENV
+
+      - name: Build package
+        run: python -m build
