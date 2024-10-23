@@ -31,11 +31,11 @@ jobs:
 
       - name: Run linting & unit tests
         run: |
-          bandit -c pyproject.toml -r snapstream tests
-          pydocstyle snapstream tests
-          pyright snapstream tests
-          flake8 snapstream tests
-          pytest snapstream tests --ignore tests/integration/
+          bandit -c pyproject.toml -r slipstream tests
+          pydocstyle slipstream tests
+          pyright slipstream tests
+          flake8 slipstream tests
+          pytest slipstream tests --ignore tests/integration/
 
       - uses: nick-fields/retry@v3
         name: Run integration tests linux
