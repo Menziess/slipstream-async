@@ -50,13 +50,16 @@ jobs:
       - name: Clear cache
         run: find . -name "__pycache__" -exec rm -r {} +; find . -name "*.pyc" -exec rm -f {} +
 
-      - name: Run linting & unit tests
+      - name: Run linting
         run: |
           bandit -c pyproject.toml -r slipstream tests
           pydocstyle slipstream tests
           pyright slipstream tests
           flake8 slipstream tests
-          pytest slipstream tests --ignore tests/integration/
+
+      - name: Run tests
+        run: |
+          pytest --ignore tests/integration/
 
       - uses: nick-fields/retry@v3
         name: Run integration tests linux
