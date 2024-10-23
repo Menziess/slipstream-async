@@ -77,13 +77,14 @@ Run the customized hello-world snippet:
 
 
   @handle(messages(), sink=[t])
-  def produce_message(msg):
+  def handle_message(msg):
       yield f'emoji {msg}'
 
 
   @handle(t, sink=[print])
   def consume_message(msg):
-      yield f'received: {msg}'
+      emoji = msg.value
+      yield f'received: {emoji}'
 
 
   run(stream())
