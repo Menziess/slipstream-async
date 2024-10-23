@@ -50,6 +50,7 @@ jobs:
         run: |
           bandit -c pyproject.toml -r slipstream tests
           pydocstyle slipstream tests
+          pyright slipstream tests
 
       - uses: nick-fields/retry@v3
         name: Run integration tests linux
