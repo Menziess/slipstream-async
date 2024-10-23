@@ -79,15 +79,10 @@ class Conf(metaclass=Singleton):
 
     async def _start(self, **kwargs):
         try:
-            results = await gather(*[
+            await gather(*[
                 self._distribute_messages(key, it, kwargs)
                 for key, it in self.iterables
-            ], return_exceptions=True)
-            errors = [_ for _ in results if isinstance(_, Exception)]
-            if nr_errors := len(errors):
-                logger.warning(f'Stream ended with {nr_errors} errors:')
-            for error in errors:
-                logger.error(error)
+            ])
         except KeyboardInterrupt:
             pass
         finally:
