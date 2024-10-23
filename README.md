@@ -32,7 +32,7 @@ async def messages():
 
 
 @handle(messages(), sink=[print])
-def print_time(msg):
+def handle_message(msg):
     yield f'Hello {msg}!'
 
 
