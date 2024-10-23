@@ -25,11 +25,17 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Create and activate virtualenv
+      - name: Use virutalenv (Unix)
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         run: |
-          python -m venv .venv
-          echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH  # For Unix
-          echo "${{ github.workspace }}\.venv\Scripts" >> $GITHUB_PATH  # For Windows
+          echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+          source .venv/bin/activate
+
+      - name: Use virtualenv (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "${{ github.workspace }}\.venv\Scripts" >> $GITHUB_PATH
+          .venv\Scripts\activate
 
       - name: Install package
         run: |
