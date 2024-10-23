@@ -6,20 +6,6 @@
 
 Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
-## Installation
-
-```sh
-pip install slipstream
-```
-
-## Usage
-
-The `handle` decorator snaps asynchronous iterables to user functions, and starts processing them when we run `stream`:
-
-![demo](./res/demo.gif)
-
-We pass the callable `print` to print out the return value. Multiple iterables and sinks can be passed.
-
 ```py
 from asyncio import run
 
@@ -47,11 +33,33 @@ Hello 🐟!
 Hello 👌!
 ```
 
-To try it out for yourself, spin up a local kafka broker with [docker-compose.yml](docker-compose.yml), using `localhost:29091` to connect:
+## Usage
+
+Async `iterables` are sources, async `callables` are sinks.
+
+Many-to-many relations between sources and sinks can be established using decorated handler functions using `handle`:
+
+![demo](./res/demo.gif)
+
+The 4 emoji's were printed using the callable `print`, the handler function started processing the iterable upon calling `stream()`.
+
+## Quickstart
+
+Install slipstream:
 
 ```sh
+pip install slipstream
+```
+
+Run the demo snippet or spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), using `localhost:29091` to connect:
+
+```sh
+pip install slipstream[kafka]
+
 docker compose up broker -d
 ```
+
+Follow the docs and set up a Kafka connection: [slipstream.readthedocs.io](https://slipstream.readthedocs.io).
 
 ## Features
 
