@@ -43,8 +43,12 @@ jobs:
 
       - name: Install package
         run: |
+          which python
           pip install --upgrade pip
           pip install .[dev,test,kafka,cache]
+
+      - name: Clear cache
+        run: find . -name "__pycache__" -exec rm -r {} +; find . -name "*.pyc" -exec rm -f {} +
 
       - name: Run linting & unit tests
         run: |
