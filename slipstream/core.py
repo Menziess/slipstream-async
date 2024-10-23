@@ -22,6 +22,7 @@ from aiokafka import (
     AIOKafkaProducer,
     ConsumerRecord,
 )
+from anyio import sleep
 
 from slipstream.caching import Cache
 from slipstream.codecs import ICodec
@@ -89,6 +90,10 @@ class Conf(metaclass=Singleton):
             await self._shutdown()
 
     async def _shutdown(self) -> None:
+        # When the program immediately crashes give chance for topic
+        # consumer and producer to be fully initialized before
+        # shutting them down
+        await sleep(0.05)
         for t in self.topics:
             await t._shutdown()
 
@@ -195,18 +200,32 @@ class Topic:
         """Produce message to topic."""
         if not self.producer:
             self.producer = await self.get_producer()
-        await self.producer.send_and_wait(
-            self.name,
-            key=key,
-            value=value,
-        )
+        try:
+            await self.producer.send_and_wait(
+                self.name,
+                key=key,
+                value=value,
+            )
+        except Exception as e:
+            logger.error(
+                f'Error raised while producing to Topic {self.name}: '
+                f'{e.args[0]}' if e.args else ''
+            )
+            raise
 
     async def __aiter__(self) -> AsyncIterator[ConsumerRecord]:
         """Iterate over messages from topic."""
         if not self.consumer:
             self.consumer = await self.get_consumer()
-        async for msg in self.consumer:
-            yield msg
+        try:
+            async for msg in self.consumer:
+                yield msg
+        except Exception as e:
+            logger.error(
+                f'Error raised while consuming from Topic {self.name}: '
+                f'{e.args[0]}' if e.args else ''
+            )
+            raise
 
     async def __next__(self):
         """Get the next message from topic."""
