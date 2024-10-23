@@ -75,6 +75,10 @@ build-backend = "setuptools.build_meta"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+include = [
+  "slipstream/**/*.py",
+  "tests/**/*.py"
+]
 
 [tool.bandit]
 exclude_dirs = ["tests"]
