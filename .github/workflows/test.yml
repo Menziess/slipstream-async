@@ -1,0 +1,46 @@
+name: Test Python Package
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+      python-version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install package
+        run: |
+          pip install .[dev,test,kafka,cache]
+
+      - name: Run linting & unit tests
+        run: |
+          bandit -c pyproject.toml -r snapstream tests
+          pydocstyle snapstream tests
+          pyright snapstream tests
+          flake8 snapstream tests
+          pytest snapstream tests --ignore tests/integration/
+
+      - uses: nick-fields/retry@v3
+        name: Run integration tests linux
+        if: ${{ inputs.os == 'ubuntu-latest' }}
+        with:
+          timeout_minutes: 1
+          max_attempts: 3
+          command: pytest tests/integration/
