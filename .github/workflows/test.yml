@@ -47,9 +47,6 @@ jobs:
           pip install --upgrade pip
           pip install -e .[dev,test,kafka,cache]
 
-      - name: Clear cache
-        run: find . -name "__pycache__" -exec rm -r {} +; find . -name "*.pyc" -exec rm -f {} +
-
       - name: Run linting
         run: |
           bandit -c pyproject.toml -r slipstream tests
