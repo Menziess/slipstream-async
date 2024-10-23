@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def iscoroutinecallable(o: Any) -> bool:
-    """Checks whether function is coroutine."""
+    """Check whether function is coroutine."""
     return iscoroutinefunction(o) or (
         hasattr(o, '__call__')
         and iscoroutinefunction(o.__call__)
