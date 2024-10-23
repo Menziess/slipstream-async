@@ -25,6 +25,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Create virtualenv
+        run: |
+          python -m venv .venv
+
       - name: Use virutalenv (Unix)
         if: runner.os == 'Linux' || runner.os == 'macOS'
         run: |
