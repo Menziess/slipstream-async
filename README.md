@@ -41,8 +41,8 @@ Decorate handler functions using `handle`, then run `stream` to start processing
 
 ![demo](./res/demo.gif)
 
-The 4 emoji's were printed using the callable `print`.
 Multiple sources and sinks can be provided to establish many-to-many relations between them.
+The 4 emoji's were printed using the callable `print`.
 
 ## Quickstart
 

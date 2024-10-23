@@ -5,11 +5,11 @@ Slipstream documentation
 
 Slipstream can be summarized as:
 
-- ``Topic``: default way to interact with kafka
-- ``Cache``: default persistence functionality
+- ``iterables``: act as sources for our handler functions
+- ``callables``: can be used as sinks
 - ``handle`` and ``stream``: a data-flow model used to parallelize stream processing
 
-A typical hello-world application would look something like this:
+A typical **slipstream** hello-world snippet would look something like this:
 
 ::
 
@@ -24,12 +24,11 @@ A typical hello-world application would look something like this:
 
 
   @handle(messages(), sink=[print])
-  def print_time(msg):
+  def handle_message(msg):
       yield f'Hello {msg}!'
 
 
-  if __name__ == '__main__':
-      run(stream())
+  run(stream())
 
 ::
 
@@ -38,13 +37,70 @@ A typical hello-world application would look something like this:
   Hello 🐟!
   Hello 👌!
 
+This simple yet powerful flow can be used in combination with Kafka and caches to build complex stateful streaming applications.
+
+Install using ``pip``::
+
+    pip install slipstream
+
+Kafka
+-----
+
+Install ``aiokafka`` separately or along with slipstream::
+
+    pip install slipstream[kafka]
+
+Spin up a local kafka broker with `docker-compose.yml <https://github.com/Menziess/slipstream/blob/master/docker-compose.yml>`_ to follow along:
+
+.. code-block:: bash
+
+  docker compose up broker -d
+
+Run the customized hello-world snippet:
+
+::
+
+  from asyncio import run
+
+  from slipstream import Topic, handle, stream
+
+  t = Topic('emoji', {
+      'bootstrap_servers': 'localhost:29091',
+      'group_instance_id': 'demo',
+      'group_id': 'demo',
+  })
+
+
+  async def messages():
+      for emoji in '🏆📞🐟👌':
+          yield emoji
+
+
+  @handle(messages(), sink=[t])
+  def produce_message(msg):
+      yield f'emoji {msg}'
+
+
+  @handle(t, sink=[print])
+  def consume_message(msg):
+      yield f'received: {msg}'
+
+
+  run(stream())
+
+::
+
+  received: emoji 🏆
+  received: emoji 📞
+  received: emoji 🐟
+  received: emoji 👌
+
+Learn what else you can do from here:
+
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
 
-   kafka
-   install
-   examples
+   learn_more
 
 .. toctree::
    :maxdepth: 1
