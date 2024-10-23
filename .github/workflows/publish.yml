@@ -11,9 +11,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    permissions:
-      id-token: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -28,14 +25,15 @@ jobs:
       - name: Set package version
         run: echo "PACKAGE_VERSION=${{ steps.get_tag.outputs.tag }}" >> $GITHUB_ENV
 
-      - name: Build package
+      - name: Build
         run: |
           pip install --upgrade pip
-          pip install build
+          pip install build twine
           python -m build
 
-      - name: Publish distribution 📦 to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish to PyPI
+        run: |
+          twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
