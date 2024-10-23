@@ -6,6 +6,10 @@
 
 Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
+```sh
+pip install slipstream
+```
+
 ```py
 from asyncio import run
 
@@ -46,17 +50,15 @@ The 4 emoji's were printed using the callable `print`.
 
 ## Quickstart
 
-Install slipstream and run the demo snippet above:
+Install `aiokafka` (latest) along with slipstream:
 
 ```sh
-pip install slipstream
+pip install slipstream[kafka]
 ```
 
 Spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), using `localhost:29091` to connect:
 
 ```sh
-pip install slipstream[kafka]
-
 docker compose up broker -d
 ```
 
