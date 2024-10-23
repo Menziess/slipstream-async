@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import gather
+from asyncio import gather, sleep
 from collections.abc import AsyncIterable
 from inspect import signature
 from re import sub
@@ -22,7 +22,6 @@ from aiokafka import (
     AIOKafkaProducer,
     ConsumerRecord,
 )
-from anyio import sleep
 
 from slipstream.caching import Cache
 from slipstream.codecs import ICodec
