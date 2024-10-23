@@ -35,23 +35,24 @@ Hello 👌!
 
 ## Usage
 
-Async `iterables` are sources, async `callables` are sinks.
+Async `iterables` are sources, (async) `callables` are sinks.
 
-Many-to-many relations between sources and sinks can be established using decorated handler functions using `handle`:
+Decorate handler functions using `handle`, then run `stream` to start processing:
 
 ![demo](./res/demo.gif)
 
-The 4 emoji's were printed using the callable `print`, the handler function started processing the iterable upon calling `stream()`.
+The 4 emoji's were printed using the callable `print`.
+Multiple sources and sinks can be provided to establish many-to-many relations between them.
 
 ## Quickstart
 
-Install slipstream:
+Install slipstream and run the demo snippet above:
 
 ```sh
 pip install slipstream
 ```
 
-Run the demo snippet or spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), using `localhost:29091` to connect:
+Spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), using `localhost:29091` to connect:
 
 ```sh
 pip install slipstream[kafka]
