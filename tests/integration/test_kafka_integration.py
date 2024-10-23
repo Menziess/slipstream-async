@@ -5,7 +5,7 @@ import pytest
 from slipstream import Topic
 
 
-@pytest.mark.forked
+@pytest.mark.forked  # disable when using debugger
 @pytest.mark.asyncio
 async def test_produce_consume(kafka):
     """Should be able to exchange messages with kafka."""
@@ -21,9 +21,9 @@ async def test_produce_consume(kafka):
     await t('c'.encode(), 'c'.encode())
 
     msg = await next(t)
-    assert msg.value == b'a'
+    assert msg.value == 'a'
 
-    expected = [b'b', b'c']
+    expected = ['b', 'c']
     async for msg in t:
         assert msg.value == expected.pop(0)
         if len(expected) == 0:
