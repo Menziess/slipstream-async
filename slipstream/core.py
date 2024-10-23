@@ -88,6 +88,8 @@ class Conf(metaclass=Singleton):
                 logger.warning(f'Stream ended with {nr_errors} errors:')
             for error in errors:
                 logger.error(error)
+        except KeyboardInterrupt:
+            pass
         finally:
             await self._shutdown()
 
