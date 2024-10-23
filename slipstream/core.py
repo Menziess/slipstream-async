@@ -200,6 +200,10 @@ class Topic:
         """Produce message to topic."""
         if not self.producer:
             self.producer = await self.get_producer()
+        if isinstance(key, str) and not self.conf.get('key_serializer'):
+            key = key.encode()
+        if isinstance(value, str) and not self.conf.get('value_serializer'):
+            value = value.encode()
         try:
             await self.producer.send_and_wait(
                 self.name,
@@ -219,6 +223,16 @@ class Topic:
             self.consumer = await self.get_consumer()
         try:
             async for msg in self.consumer:
+                if (
+                    isinstance(msg.key, bytes)
+                    and not self.conf.get('key_deserializer')
+                ):
+                    msg.key = msg.key.decode()
+                if (
+                    isinstance(msg.value, bytes)
+                    and not self.conf.get('value_deserializer')
+                ):
+                    msg.value = msg.value.decode()
                 yield msg
         except Exception as e:
             logger.error(
