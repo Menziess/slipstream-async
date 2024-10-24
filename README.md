@@ -1,8 +1,11 @@
-[![Test Python Package](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml/badge.svg)](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml) [![Documentation Status](https://readthedocs.org/projects/slipstream/badge/?version=latest)](https://slipstream.readthedocs.io/en/latest/?badge=latest) [![Downloads](https://static.pepy.tech/personalized-badge/slipstream-async?period=month&units=international_system&left_color=grey&right_color=brightgreen&left_text=downloads/month)](https://pepy.tech/project/slipstream-async)
+[![Test Python Package](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml/badge.svg)](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml)
+[![Documentation Status](https://readthedocs.org/projects/slipstream/badge/?version=latest)](https://slipstream.readthedocs.io/en/latest/?badge=latest)
+
+<!-- [![Downloads](https://static.pepy.tech/personalized-badge/slipstream-async?period=month&units=international_system&left_color=grey&right_color=brightgreen&left_text=downloads/month)](https://pepy.tech/project/slipstream-async) -->
 
 # Slipstream
 
-<img src="./res/logo.png" width="25%" height="25%" align="right" />
+<img src="https://raw.githubusercontent.com/menziess/slipstream/master/res/logo.png" width="25%" height="25%" align="right" />
 
 Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
