@@ -1,4 +1,4 @@
-[![Test Python Package](https://github.com/Menziess/slipstream/actions/workflows/python-test.yml/badge.svg)](https://github.com/Menziess/slipstream/actions/workflows/python-test.yml) [![Documentation Status](https://readthedocs.org/projects/slipstream/badge/?version=latest)](https://slipstream.readthedocs.io/en/latest/?badge=latest) [![Downloads](https://static.pepy.tech/personalized-badge/slipstream?period=month&units=international_system&left_color=grey&right_color=brightgreen&left_text=downloads/month)](https://pepy.tech/project/slipstream)
+[![Test Python Package](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml/badge.svg)](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml) [![Documentation Status](https://readthedocs.org/projects/slipstream/badge/?version=latest)](https://slipstream.readthedocs.io/en/latest/?badge=latest) [![Downloads](https://static.pepy.tech/personalized-badge/slipstream-async?period=month&units=international_system&left_color=grey&right_color=brightgreen&left_text=downloads/month)](https://pepy.tech/project/slipstream-async)
 
 # Slipstream
 
@@ -7,7 +7,7 @@
 Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
 ```sh
-pip install slipstream
+pip install slipstream-async
 ```
 
 ```py
@@ -53,7 +53,7 @@ The 4 emoji's were printed using the callable `print`.
 Install `aiokafka` (latest) along with slipstream:
 
 ```sh
-pip install slipstream[kafka]
+pip install slipstream-async[kafka]
 ```
 
 Spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), using `localhost:29091` to connect:

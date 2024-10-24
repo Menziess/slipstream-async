@@ -41,14 +41,14 @@ This simple yet powerful flow can be used in combination with Kafka and caches t
 
 Install using ``pip``::
 
-    pip install slipstream
+    pip install slipstream-async
 
 Kafka
 -----
 
 Install ``aiokafka`` separately or along with slipstream (unpinned)::
 
-    pip install slipstream[kafka]
+    pip install slipstream-async[kafka]
 
 Spin up a local kafka broker with `docker-compose.yml <https://github.com/Menziess/slipstream/blob/master/docker-compose.yml>`_ to follow along:
 
