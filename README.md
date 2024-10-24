@@ -1,7 +1,6 @@
 [![Test Python Package](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml/badge.svg)](https://github.com/Menziess/slipstream-async/actions/workflows/triggered-tests.yml)
 [![Documentation Status](https://readthedocs.org/projects/slipstream/badge/?version=latest)](https://slipstream.readthedocs.io/en/latest/?badge=latest)
-
-<!-- [![Downloads](https://static.pepy.tech/personalized-badge/slipstream-async?period=month&units=international_system&left_color=grey&right_color=brightgreen&left_text=downloads/month)](https://pepy.tech/project/slipstream-async) -->
+[![PyPI Downloads](https://img.shields.io/pypi/dm/slipstream-async.svg)](https://pypi.org/project/slipstream-async/)
 
 # Slipstream
 
