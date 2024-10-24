@@ -1,5 +1,5 @@
 [project]
-name = "slipstream"
+name = "slipstream-async"
 dynamic = ["version"]
 description = "Streamline your stream processing."
 authors = [{ name = "Menziess", email = "stefan_schenk@hotmail.com" }]
