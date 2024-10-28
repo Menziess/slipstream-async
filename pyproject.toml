@@ -20,9 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 requires-python = ">=3.10"
-dependencies = [
-  "uvloop",
-]
+dependencies = []
 
 [project.optional-dependencies]
 kafka = [
