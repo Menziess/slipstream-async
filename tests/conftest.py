@@ -7,20 +7,22 @@ from typing import Iterator
 from pytest import fixture
 from testcontainers.kafka import KafkaContainer
 
-from slipstream import Cache
+try:
+    from slipstream import Cache
+
+    @fixture
+    def cache() -> Iterator[Cache]:
+        """Get Cache instance that automatically cleans itself."""
+        c = Cache('tests/db')
+        try:
+            yield c
+        finally:
+            c.close()
+            c.destroy()
+except ImportError:
+    pass
 
 KAFKA_CONTAINER = 'confluentinc/cp-kafka:latest'
-
-
-@fixture
-def cache() -> Iterator[Cache]:
-    """Get Cache instance that automatically cleans itself."""
-    c = Cache('tests/db')
-    try:
-        yield c
-    finally:
-        c.close()
-        c.destroy()
 
 
 @fixture(scope='session')

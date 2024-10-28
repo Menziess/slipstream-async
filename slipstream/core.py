@@ -23,8 +23,7 @@ from aiokafka import (
     ConsumerRecord,
 )
 
-from slipstream.caching import Cache
-from slipstream.codecs import ICodec
+from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import Singleton, get_params_names, iscoroutinecallable
 
 KAFKA_CLASSES_PARAMS = {
@@ -261,11 +260,11 @@ async def _sink_output(
     output: Any
 ) -> None:
     is_coroutine = iscoroutinecallable(s)
-    if isinstance(s, Cache):
+    if isinstance(s, ICache):
         if not isinstance(output, tuple):
             raise ValueError('Cache sink expects: Tuple[key, val].')
         else:
-            if isinstance(s, Cache):
+            if isinstance(s, ICache):
                 s(*output)
     elif isinstance(s, Topic):
         if not isinstance(output, tuple):
