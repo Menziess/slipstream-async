@@ -22,7 +22,7 @@ class ICache(metaclass=ABCMeta):
     """Base class for cache implementations."""
 
     @abstractmethod
-    def __call__(self, key, val) -> None:
+    async def __call__(self, key, val) -> None:
         """Call cache to set item."""
         raise NotImplementedError
 

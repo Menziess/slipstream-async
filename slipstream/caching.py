@@ -15,6 +15,7 @@ from typing import (
 )
 
 from slipstream.interfaces import ICache
+from slipstream.utils import PubSub
 
 try:
     import rocksdict  # noqa: F401  # ruff: noqa
@@ -80,6 +81,7 @@ if ROCKSDICT_AVAILABLE:
                 for key in Rdict.list_cf(path, options)
             } if os.path.exists(path + '/CURRENT') else {}
             self.db = Rdict(path, options, column_families, access_type)
+            self.pubsub, self.iterable_key = PubSub(), str(id(self)) + 'cache'
 
         @staticmethod
         def _default_options(target_table_size: int):
@@ -114,12 +116,15 @@ if ROCKSDICT_AVAILABLE:
             with (lock := self._locks[index]):
                 yield lock
 
-        def __call__(self, key, val, *args) -> None:
+        async def __call__(self, key, val, *args) -> None:
             """Call cache to set item."""
             self.__setitem__(key, val)
+            await self.pubsub.apublish(self.iterable_key, (key, val))
 
         async def __aiter__(self) -> AsyncIterator[Any]:
-            pass
+            """Provide updates on writes to cache."""
+            async for msg in self.pubsub.iter_topic(self.iterable_key):
+                yield msg
 
         def __contains__(self, key) -> bool:
             """Key exists in db."""

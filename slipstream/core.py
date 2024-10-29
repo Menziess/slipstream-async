@@ -48,6 +48,7 @@ class Conf(metaclass=Singleton):
     >>> Conf({'bootstrap_servers': 'localhost:29091'})
     {'bootstrap_servers': 'localhost:29091'}
     """
+
     pubsub = PubSub()
     topics: list['Topic'] = []
     iterables: set[tuple[str, AsyncIterable]] = set()
@@ -96,7 +97,7 @@ class Conf(metaclass=Singleton):
 
     async def _distribute_messages(self, key, it, kwargs):
         async for msg in it:
-            await self.pubsub.publish(key, msg, **kwargs)
+            await self.pubsub.apublish(key, msg, **kwargs)
 
     def __init__(self, conf: dict = {}) -> None:
         """Define init behavior."""
@@ -258,13 +259,9 @@ async def _sink_output(
     output: Any
 ) -> None:
     is_coroutine = iscoroutinecallable(s)
-    if isinstance(s, ICache):
-        if not isinstance(output, tuple):
-            raise ValueError('Cache sink expects: Tuple[key, val].')
-        else:
-            if isinstance(s, ICache):
-                s(*output)
-    elif isinstance(s, Topic):
+    if isinstance(s, ICache) and not isinstance(output, tuple):
+        raise ValueError('Cache sink expects: Tuple[key, val].')
+    elif isinstance(s, (Topic, ICache)):
         if not isinstance(output, tuple):
             await s(b'', output)  # type: ignore
         else:
