@@ -3,7 +3,16 @@
 import os
 from contextlib import contextmanager
 from threading import RLock
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from slipstream.interfaces import ICache
 
@@ -108,6 +117,9 @@ if ROCKSDICT_AVAILABLE:
         def __call__(self, key, val, *args) -> None:
             """Call cache to set item."""
             self.__setitem__(key, val)
+
+        async def __aiter__(self) -> AsyncIterator[Any]:
+            pass
 
         def __contains__(self, key) -> bool:
             """Key exists in db."""

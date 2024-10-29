@@ -28,7 +28,7 @@ async def test_Conf(mocker):
     # Register handler
     stub = mocker.stub(name='handler')
 
-    async def handler(msg, kwargs):
+    async def handler(msg, **kwargs):
         stub(msg, kwargs)
     c.register_handler(iterable_key, handler)
 

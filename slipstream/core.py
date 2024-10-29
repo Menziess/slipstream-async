@@ -24,7 +24,12 @@ from aiokafka import (
 )
 
 from slipstream.interfaces import ICache, ICodec
-from slipstream.utils import Singleton, get_params_names, iscoroutinecallable
+from slipstream.utils import (
+    PubSub,
+    Singleton,
+    get_params_names,
+    iscoroutinecallable,
+)
 
 KAFKA_CLASSES_PARAMS = {
     **get_params_names(AIOKafkaConsumer),
@@ -43,13 +48,9 @@ class Conf(metaclass=Singleton):
     >>> Conf({'bootstrap_servers': 'localhost:29091'})
     {'bootstrap_servers': 'localhost:29091'}
     """
-
+    pubsub = PubSub()
     topics: list['Topic'] = []
     iterables: set[tuple[str, AsyncIterable]] = set()
-    handlers: dict[str, set[Union[
-        Callable[..., Awaitable[None]],
-        Callable[..., None]
-    ]]] = {}
 
     def register_topic(self, topic: 'Topic'):
         """Add topic to global conf."""
@@ -72,9 +73,7 @@ class Conf(metaclass=Singleton):
         ]
     ):
         """Add handler to global Conf."""
-        handlers = self.handlers.get(key, set())
-        handlers.add(handler)
-        self.handlers[key] = handlers
+        self.pubsub.subscribe(key, handler)
 
     async def _start(self, **kwargs):
         try:
@@ -97,8 +96,7 @@ class Conf(metaclass=Singleton):
 
     async def _distribute_messages(self, key, it, kwargs):
         async for msg in it:
-            for h in self.handlers.get(key, []):
-                await h(msg=msg, kwargs=kwargs)  # type: ignore
+            await self.pubsub.publish(key, msg, **kwargs)
 
     def __init__(self, conf: dict = {}) -> None:
         """Define init behavior."""
@@ -301,7 +299,7 @@ def handle(
         parameters = signature(f).parameters.values()
         is_coroutine = iscoroutinecallable(f)
 
-        async def _handler(msg, kwargs={}):
+        async def _handler(msg, **kwargs):
             if is_coroutine:
                 if any(p.kind == p.VAR_KEYWORD for p in parameters):
                     output = await f(msg, **kwargs)
