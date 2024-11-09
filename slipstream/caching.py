@@ -1,8 +1,8 @@
 """Slipstream caching."""
 
 import os
-from contextlib import contextmanager
-from threading import RLock
+from asyncio import Lock
+from contextlib import asynccontextmanager
 from typing import (
     Any,
     AsyncIterator,
@@ -74,7 +74,7 @@ if ROCKSDICT_AVAILABLE:
             """
             self.name = path
             self._number_of_locks = number_of_locks
-            self._locks = [RLock() for _ in range(self._number_of_locks)]
+            self._locks = [Lock() for _ in range(self._number_of_locks)]
             options = options or self._default_options(target_table_size)
             column_families = column_families or {
                 key: options
@@ -109,11 +109,11 @@ if ROCKSDICT_AVAILABLE:
             options.set_delete_obsolete_files_period_micros(10 * 1000)
             return options
 
-        @contextmanager
-        def _get_lock(self, key):
+        @asynccontextmanager
+        async def _get_lock(self, key):
             """Get lock from a pool of locks based on key."""
             index = hash(key) % self._number_of_locks
-            with (lock := self._locks[index]):
+            async with (lock := self._locks[index]):
                 yield lock
 
         async def __call__(self, key, val, *args) -> None:
@@ -143,8 +143,13 @@ if ROCKSDICT_AVAILABLE:
 
         def __setitem__(self, key, val) -> None:
             """Set item in db."""
-            with self._get_lock(key):
-                self.db[key] = val
+            self.db[key] = val
+
+        @asynccontextmanager
+        async def transaction(self, key):
+            """Lock the db entry while using the context manager."""
+            async with self._get_lock(key):
+                yield self
 
         def __enter__(self) -> 'Cache':
             """Contextmanager."""
@@ -170,12 +175,6 @@ if ROCKSDICT_AVAILABLE:
             """Set custom write options."""
             return self.db.set_write_options(write_opt)
 
-        @contextmanager
-        def transaction(self, key) -> Any:
-            """Lock the db entry while using the context manager."""
-            with self._get_lock(key):
-                yield self
-
         def get(
             self,
             key: Union[str, int, float, bytes, bool, List[
@@ -193,8 +192,7 @@ if ROCKSDICT_AVAILABLE:
             write_opt: Union[WriteOptions, None] = None
         ) -> None:
             """Put item in database using key."""
-            with self._get_lock(key):
-                return self.db.put(key, value, write_opt)
+            return self.db.put(key, value, write_opt)
 
         def delete(
             self,

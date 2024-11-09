@@ -83,7 +83,6 @@ class PubSub(metaclass=Singleton):
 
         try:
             while True:
-                msg = await queue.get()
-                yield msg
+                yield await queue.get()
         finally:
             self.unsubscribe(topic, queue.put_nowait)
