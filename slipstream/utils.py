@@ -1,8 +1,8 @@
 """Slipstream utilities."""
 
 import logging
-from asyncio import Queue, iscoroutinefunction
-from inspect import signature
+from asyncio import Queue
+from inspect import iscoroutinefunction, signature
 from typing import Any, AsyncIterator, Callable
 
 logger = logging.getLogger(__name__)

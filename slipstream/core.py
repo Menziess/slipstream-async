@@ -3,7 +3,7 @@
 import logging
 from asyncio import gather, sleep
 from collections.abc import AsyncIterable
-from inspect import signature
+from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
     Any,
@@ -295,9 +295,10 @@ def handle(
     def _deco(f):
         parameters = signature(f).parameters.values()
         is_coroutine = iscoroutinecallable(f)
+        is_asyncgen = isasyncgenfunction(f)
 
         async def _handler(msg, **kwargs):
-            if is_coroutine:
+            if is_coroutine and not is_asyncgen:
                 if any(p.kind == p.VAR_KEYWORD for p in parameters):
                     output = await f(msg, **kwargs)
                 else:
@@ -307,6 +308,12 @@ def handle(
                     output = f(msg, **kwargs)
                 else:
                     output = f(msg) if parameters else f()
+
+            if is_asyncgen:
+                async for val in output:
+                    for s in sink:
+                        await _sink_output(s, val)
+                return
 
             for val in output if isinstance(output, Generator) else [output]:
                 for s in sink:
