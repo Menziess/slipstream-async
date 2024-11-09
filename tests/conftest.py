@@ -16,6 +16,8 @@ try:
         c = Cache('tests/db')
         try:
             yield c
+        except Exception as e:
+            raise e
         finally:
             c.close()
             c.destroy()

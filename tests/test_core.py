@@ -43,7 +43,7 @@ def test_get_iterable():
     assert isinstance(aiter(t), AsyncIterable)
 
 
-def test_get_callable(mocker):
+def test_get_callable():
     """Should return a callable."""
     t = Topic('test', {})
     assert isinstance(t, Callable)

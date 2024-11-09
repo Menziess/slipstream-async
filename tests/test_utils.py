@@ -1,6 +1,14 @@
+from asyncio import gather
 from inspect import Parameter, _ParameterKind
 
-from slipstream.utils import Singleton, get_params_names, iscoroutinecallable
+import pytest
+
+from slipstream.utils import (
+    PubSub,
+    Singleton,
+    get_params_names,
+    iscoroutinecallable,
+)
 
 
 def test_iscoroutinecallable():
@@ -41,3 +49,37 @@ def test_Singleton():
     b = MySingleton()
 
     assert a is b
+
+
+@pytest.mark.forked  # disable when using debugger
+@pytest.mark.asyncio
+async def test_PubSub():
+    """Should succesfully send and receive data."""
+    topic, count, msg = 'test_PubSub', 0, {'msg': 'hi'}
+
+    def handler(x):
+        nonlocal count
+        count += 1
+        assert x == msg
+
+    PubSub().subscribe(topic, handler)
+
+    PubSub().publish(topic, msg)
+    await PubSub().apublish(topic, msg)
+
+    async def analyze_iter_topic():
+        async for x in PubSub().iter_topic(topic):
+            nonlocal count
+            count += 1
+            assert x == msg
+            break
+
+    await gather(
+        analyze_iter_topic(),
+        PubSub().apublish(topic, msg),
+    )
+
+    PubSub().unsubscribe(topic, handler)
+
+    assert topic not in PubSub._topics
+    assert count == 4
