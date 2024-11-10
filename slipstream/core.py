@@ -193,7 +193,7 @@ class Topic:
         await producer.start()
         return producer
 
-    async def __call__(self, key, value) -> None:
+    async def __call__(self, key, value, **kwargs) -> None:
         """Produce message to topic."""
         if not self.producer:
             self.producer = await self.get_producer()
@@ -206,6 +206,7 @@ class Topic:
                 self.name,
                 key=key,
                 value=value,
+                **kwargs
             )
         except Exception as e:
             logger.error(
