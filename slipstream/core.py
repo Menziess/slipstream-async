@@ -245,10 +245,13 @@ class Topic:
 
     async def _shutdown(self):
         """Cleanup and finalization."""
-        if self.consumer:
-            await self.consumer.stop()
-        if self.producer:
-            await self.producer.stop()
+        for client in (self.consumer, self.producer):
+            if not client:
+                continue
+            try:
+                await client.stop()
+            except RuntimeError:
+                pass
 
 
 async def _sink_output(
