@@ -167,7 +167,22 @@ class Topic:
             if k in params
         })
 
-    async def get_consumer(self):
+    async def seek(self, offset: int, consumer: Optional[AIOKafkaConsumer]):
+        """Seek to offset."""
+        if not (c := consumer or self.consumer):
+            raise RuntimeError('No consumer provided.')
+        partitions = c.assignment()
+        if offset < READ_FROM_START:
+            raise ValueError(f'Offset must be bigger than: {READ_FROM_START}.')
+        if offset == READ_FROM_START:
+            await c.seek_to_beginning(*partitions)
+        elif offset == READ_FROM_END:
+            await c.seek_to_end(*partitions)
+        else:
+            for p in partitions:
+                c.seek(p, offset)
+
+    async def get_consumer(self) -> AIOKafkaConsumer:
         """Get started instance of Kafka consumer."""
         params = get_params_names(AIOKafkaConsumer)
         if self.codec:
@@ -178,6 +193,12 @@ class Topic:
             if k in params
         })
         await consumer.start()
+        if self.starting_offset:
+            try:
+                await self.seek(self.starting_offset, consumer)
+            except Exception:
+                await consumer.stop()
+                raise
         return consumer
 
     async def get_producer(self):
