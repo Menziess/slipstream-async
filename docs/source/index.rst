@@ -100,8 +100,9 @@ Learn what else you can do from here:
 
 .. toctree::
    :maxdepth: 2
+   :caption: Contents:
 
-   learn_more
+   features
 
 .. toctree::
    :maxdepth: 1
