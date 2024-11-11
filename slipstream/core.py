@@ -141,6 +141,7 @@ class Topic:
         conf: dict = {},
         offset: Optional[int] = None,
         codec: Optional[ICodec] = None,
+        dry: bool = False,
     ):
         """Create topic instance to produce and consume messages."""
         c = Conf()
@@ -149,6 +150,7 @@ class Topic:
         self.conf = {**c.conf, **conf}
         self.starting_offset = offset
         self.codec = codec
+        self.dry = dry
 
         self.consumer: Optional[AIOKafkaConsumer] = None
         self.producer: Optional[AIOKafkaProducer] = None
@@ -222,6 +224,11 @@ class Topic:
             key = key.encode()
         if isinstance(value, str) and not self.conf.get('value_serializer'):
             value = value.encode()
+        if self.dry:
+            logger.warning(
+                f'Skipped sending message to {self.name} [dry=True].'
+            )
+            return
         try:
             await self.producer.send_and_wait(
                 self.name,
