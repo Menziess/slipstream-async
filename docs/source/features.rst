@@ -230,3 +230,63 @@ Custom codecs can be created using ``ICodec``:
             decoder = BinaryDecoder(bytes_reader)
             reader = DatumReader(self.schema)
             return cast(object, reader.read(decoder))
+
+Endpoint
+--------
+
+To share streaming data using API endpoints, install ``fastapi``.
+
+::
+
+    from asyncio import gather, run, sleep
+    from time import strftime
+
+    from fastapi import FastAPI
+    from fastapi.responses import StreamingResponse
+    from uvicorn import Config, Server
+
+    from slipstream import Cache, handle, stream
+
+    app, cache = FastAPI(), Cache('db')
+
+    async def timer(interval=1.0):
+        while True:
+            yield
+            await sleep(interval)
+
+    async def cache_value_updates():
+        async for _, v in cache.__aiter__():
+            yield v + '\n'
+
+    @handle(timer(), sink=[cache, print])
+    def tick_tock():
+        yield 'time', strftime('%H:%M:%S')
+
+    @app.get('/updates')
+    async def updates():
+        return StreamingResponse(
+            cache_value_updates(),
+            media_type='text/event-stream'
+        )
+
+    async def main():
+        config = Config(app=app, host='0.0.0.0', port=8000)
+        server = Server(config)
+        await gather(stream(), server.serve())
+
+    if __name__ == '__main__':
+        run(main())
+
+When we call the following url ``http://127.0.0.1:8000/updates`` it will stream the cache updates:
+
+::
+
+    curl -N http://127.0.0.1:8000/updates
+
+::
+
+    00:16:57
+    00:16:58
+    00:16:59
+    00:17:00
+    ...
