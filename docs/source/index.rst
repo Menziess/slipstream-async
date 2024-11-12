@@ -78,7 +78,7 @@ Run the customized hello-world snippet:
 
   @handle(messages(), sink=[t])
   def handle_message(msg):
-      yield f'emoji {msg}'
+      yield None, f'emoji {msg}'
 
 
   @handle(t, sink=[print])
