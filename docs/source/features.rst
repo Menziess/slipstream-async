@@ -3,7 +3,7 @@
 Features
 ============
 
-Each example is self-contained. Can't find what you seek? Create a `new issue <https://github.com/Menziess/slipstream/issues/new>`_.
+Can't find what you seek? Create a `new issue <https://github.com/Menziess/slipstream/issues/new>`_.
 
 Topic
 -----
