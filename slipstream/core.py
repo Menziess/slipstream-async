@@ -288,6 +288,7 @@ class Topic:
 
 
 async def _sink_output(
+    f: Callable,
     s: Union[
         Callable[..., Awaitable[None]],
         Callable[..., None]
@@ -296,12 +297,13 @@ async def _sink_output(
 ) -> None:
     is_coroutine = iscoroutinecallable(s)
     if isinstance(s, ICache) and not isinstance(output, tuple):
-        raise ValueError('Cache sink expects: Tuple[key, val].')
+        raise ValueError(
+            f'Cache sink expects: Tuple[key, val] in {f.__name__}.')
+    elif isinstance(s, Topic) and not isinstance(output, tuple):
+        raise ValueError(
+            f'Topic sink expects: Tuple[key, val] in {f.__name__}.')
     elif isinstance(s, (Topic, ICache)):
-        if not isinstance(output, tuple):
-            await s(b'', output)  # type: ignore
-        else:
-            await s(*output)  # type: ignore
+        await s(*output)  # type: ignore
     else:
         if is_coroutine:
             await s(output)  # type: ignore
@@ -328,7 +330,7 @@ def handle(
     """
     c = Conf()
 
-    def _deco(f):
+    def _deco(f: Callable):
         parameters = signature(f).parameters.values()
         is_coroutine = iscoroutinecallable(f)
         is_asyncgen = isasyncgenfunction(f)
@@ -348,12 +350,12 @@ def handle(
             if is_asyncgen:
                 async for val in output:
                     for s in sink:
-                        await _sink_output(s, val)
+                        await _sink_output(f, s, val)
                 return
 
             for val in output if isinstance(output, Generator) else [output]:
                 for s in sink:
-                    await _sink_output(s, val)
+                    await _sink_output(f, s, val)
 
         for it in iterable:
             iterable_key = str(id(it))
