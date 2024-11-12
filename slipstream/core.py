@@ -16,12 +16,16 @@ from typing import (
     Union,
 )
 
-from aiokafka import (
-    AIOKafkaClient,
-    AIOKafkaConsumer,
-    AIOKafkaProducer,
-    ConsumerRecord,
-)
+try:
+    from aiokafka import (
+        AIOKafkaClient,
+        AIOKafkaConsumer,
+        AIOKafkaProducer,
+        ConsumerRecord,
+    )
+except ModuleNotFoundError:
+    print('Install aiokafka or slipstream-async[kafka]')
+    raise
 
 from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import (
