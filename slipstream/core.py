@@ -23,6 +23,7 @@ try:
         AIOKafkaProducer,
         ConsumerRecord,
     )
+    from aiokafka.helpers import create_ssl_context
 except ModuleNotFoundError:
     print('Install aiokafka or slipstream-async[kafka]')
     raise
@@ -162,6 +163,12 @@ class Topic:
         if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
             logger.warning(
                 f'Unexpected Topic {self.name} conf entries: {",".join(diff)}')
+
+        if (
+            self.conf.get('security_protocol') in ('SSL', 'SASL_SSL')
+            and not self.conf.get('ssl_context')
+        ):
+            self.conf['ssl_context'] = create_ssl_context()
 
     @property
     async def admin(self) -> AIOKafkaClient:
