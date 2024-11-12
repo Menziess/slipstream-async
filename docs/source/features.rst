@@ -234,7 +234,7 @@ Custom codecs can be created using ``ICodec``:
 Endpoint
 --------
 
-To share streaming data using API endpoints, install ``fastapi``.
+We can install ``fastapi`` to add API endpoints.
 
 ::
 
@@ -254,13 +254,13 @@ To share streaming data using API endpoints, install ``fastapi``.
             yield
             await sleep(interval)
 
-    async def cache_value_updates():
-        async for _, v in cache.__aiter__():
-            yield v + '\n'
-
     @handle(timer(), sink=[cache, print])
     def tick_tock():
         yield 'time', strftime('%H:%M:%S')
+
+    async def cache_value_updates():
+        async for _, v in cache:
+            yield v + '\n'
 
     @app.get('/updates')
     async def updates():
@@ -277,7 +277,14 @@ To share streaming data using API endpoints, install ``fastapi``.
     if __name__ == '__main__':
         run(main())
 
-When we call the following url ``http://127.0.0.1:8000/updates`` it will stream the cache updates:
+In this example we're creating a streaming endpoint that emits cache changes:
+
+- An update is emitted only when the cache is called as a function (``cache(key, val)``)
+- The cache can be used as an ``AsyncIterator`` (``async for k, v in cache``)
+- The ``cache_value_updates`` function formats values that have been updated
+- The ``updates`` endpoint returns the emitted updates through a ``StreamingResponse``
+
+When we run the application and call the endpoint, we'll receive the cache value updates:
 
 ::
 
