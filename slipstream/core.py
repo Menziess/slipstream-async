@@ -348,7 +348,7 @@ def handle(
     """
     c = Conf()
 
-    def _deco(f: Callable):
+    def _deco(f) -> Callable[..., Awaitable[None]]:
         parameters = signature(f).parameters.values()
         is_coroutine = iscoroutinecallable(f)
         is_asyncgen = isasyncgenfunction(f)
