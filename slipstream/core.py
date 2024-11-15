@@ -231,7 +231,7 @@ class Topic:
         self,
         key,
         value,
-        headers: Optional[dict] = None,
+        headers: Optional[dict[str, str]] = None,
         **kwargs
     ) -> None:
         """Produce message to topic."""
