@@ -227,7 +227,13 @@ class Topic:
         await producer.start()
         return producer
 
-    async def __call__(self, key, value, **kwargs) -> None:
+    async def __call__(
+        self,
+        key,
+        value,
+        headers: Optional[dict] = None,
+        **kwargs
+    ) -> None:
         """Produce message to topic."""
         if not self.producer:
             self.producer = await self.get_producer()
@@ -240,11 +246,16 @@ class Topic:
                 f'Skipped sending message to {self.name} [dry=True].'
             )
             return
+        headers_list = [
+            (k, v.encode())
+            for k, v in headers.items()
+        ] if headers else None
         try:
             await self.producer.send_and_wait(
                 self.name,
                 key=key,
                 value=value,
+                headers=headers_list,
                 **kwargs
             )
         except Exception as e:
