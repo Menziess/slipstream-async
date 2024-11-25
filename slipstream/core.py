@@ -235,21 +235,21 @@ class Topic:
         **kwargs
     ) -> None:
         """Produce message to topic."""
-        if not self.producer:
-            self.producer = await self.get_producer()
         if isinstance(key, str) and not self.conf.get('key_serializer'):
             key = key.encode()
         if isinstance(value, str) and not self.conf.get('value_serializer'):
             value = value.encode()
+        headers_list = [
+            (k, v.encode())
+            for k, v in headers.items()
+        ] if headers else None
         if self.dry:
             logger.warning(
                 f'Skipped sending message to {self.name} [dry=True].'
             )
             return
-        headers_list = [
-            (k, v.encode())
-            for k, v in headers.items()
-        ] if headers else None
+        if not self.producer:
+            self.producer = await self.get_producer()
         try:
             await self.producer.send_and_wait(
                 self.name,
