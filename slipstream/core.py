@@ -81,7 +81,8 @@ class Conf(metaclass=Singleton):
         """Add handler to global Conf."""
         self.pubsub.subscribe(key, handler)
 
-    async def _start(self, **kwargs):
+    async def start(self, **kwargs: dict[Any, Any]):
+        """Start processing registered iterables."""
         try:
             await gather(*[
                 self._distribute_messages(key, it, kwargs)
@@ -98,7 +99,7 @@ class Conf(metaclass=Singleton):
         # shutting them down
         await sleep(0.05)
         for t in self.topics:
-            await t._shutdown()
+            await t.shutdown()
 
     async def _distribute_messages(self, key, it, kwargs):
         async for msg in it:
@@ -294,7 +295,7 @@ class Topic:
         iterator = self.__aiter__()
         return await anext(iterator)
 
-    async def _shutdown(self):
+    async def shutdown(self):
         """Cleanup and finalization."""
         for client in (self.consumer, self.producer):
             if not client:
@@ -394,4 +395,4 @@ def stream(**kwargs):
         ... }
         >>> run(stream(**args))
     """
-    return Conf()._start(**kwargs)
+    return Conf().start(**kwargs)

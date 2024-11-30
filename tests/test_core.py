@@ -33,7 +33,7 @@ async def test_Conf(mocker):
     c.register_handler(iterable_key, handler)
 
     # Start distributing messages and confirm message was received
-    await c._start(my_arg='test')
+    await c.start(my_arg='test')
     stub.assert_called_once_with('🏆', {'my_arg': 'test'})
 
 
