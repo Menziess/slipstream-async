@@ -3,9 +3,14 @@
 import logging
 from asyncio import Queue
 from inspect import iscoroutinefunction, signature
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable, TypeAlias, Union
 
 logger = logging.getLogger(__name__)
+
+ACallable: TypeAlias = Union[
+    Callable[..., Awaitable[Any]],
+    Callable[..., Any]
+]
 
 
 def iscoroutinecallable(o: Any) -> bool:
@@ -27,7 +32,7 @@ class Singleton(type):
 
     _instances: dict['Singleton', Any] = {}
 
-    def __call__(cls, *args, **kwargs):
+    def __call__(cls, *args: Any, **kwargs: dict[Any, Any]):
         """Apply metaclass singleton action."""
         if cls not in cls._instances:
             cls._instances[cls] = super(
@@ -43,29 +48,39 @@ class Singleton(type):
 class PubSub(metaclass=Singleton):
     """Singleton publish subscribe pattern class."""
 
-    _topics: dict[str, list[Callable]] = {}
+    _topics: dict[str, list[ACallable]] = {}
 
-    def subscribe(self, topic: str, listener: Callable) -> None:
+    def subscribe(self, topic: str, listener: ACallable) -> None:
         """Subscribe callable to topic."""
         if topic not in self._topics:
             self._topics[topic] = []
         self._topics[topic].append(listener)
 
-    def unsubscribe(self, topic: str, listener: Callable) -> None:
+    def unsubscribe(self, topic: str, listener: ACallable) -> None:
         """Unsubscribe callable from topic."""
         if topic in self._topics:
             self._topics[topic].remove(listener)
             if not self._topics[topic]:
                 del self._topics[topic]
 
-    def publish(self, topic: str, *args, **kwargs) -> None:
+    def publish(
+        self,
+        topic: str,
+        *args: Any,
+        **kwargs: dict[Any, Any]
+    ) -> None:
         """Publish message to subscribers of topic."""
         if topic not in self._topics:
             return
         for listener in self._topics[topic]:
             listener(*args, **kwargs)
 
-    async def apublish(self, topic: str, *args, **kwargs) -> None:
+    async def apublish(
+        self,
+        topic: str,
+        *args: Any,
+        **kwargs: dict[Any, Any]
+    ) -> None:
         """Publish message to subscribers of topic."""
         if topic not in self._topics:
             return
@@ -77,7 +92,7 @@ class PubSub(metaclass=Singleton):
 
     async def iter_topic(self, topic: str) -> AsyncIterator[Any]:
         """Asynchronously iterate over messages published to a topic."""
-        queue = Queue()
+        queue: Queue[Any] = Queue()
 
         self.subscribe(topic, queue.put_nowait)
 
