@@ -3,6 +3,7 @@
 import os
 from asyncio import Lock
 from contextlib import asynccontextmanager
+from types import TracebackType
 from typing import (
     Any,
     AsyncIterator,
@@ -11,21 +12,24 @@ from typing import (
     List,
     Optional,
     Tuple,
+    Type,
     Union,
 )
 
-from slipstream.interfaces import ICache
+from slipstream.interfaces import ICache, Key
 from slipstream.utils import PubSub
 
+rocksdict_available = False
+
 try:
-    import rocksdict  # noqa: F401  # ruff: noqa
-    ROCKSDICT_AVAILABLE = True
+    import rocksdict  # noqa: F401  # ruff: noqa # pyright: ignore
+    rocksdict_available = True
 except ImportError:
-    ROCKSDICT_AVAILABLE = False
+    pass
 
 MB, MINUTES = 1024 * 1024, 60
 
-if ROCKSDICT_AVAILABLE:
+if rocksdict_available:
     from rocksdict import (
         AccessType,
         ColumnFamily,
@@ -58,11 +62,11 @@ if ROCKSDICT_AVAILABLE:
         def __init__(
             self,
             path: str,
-            options: Union[Options, None] = None,
+            options: Optional[Options] = None,
             column_families: Union[Dict[str, Options], None] = None,
-            access_type=AccessType.read_write(),
-            target_table_size=25 * MB,
-            number_of_locks=16
+            access_type: AccessType = AccessType.read_write(),
+            target_table_size: int = 25 * MB,
+            number_of_locks: int = 16
         ) -> None:
             """Create instance that holds rocksdb reference.
 
@@ -110,13 +114,13 @@ if ROCKSDICT_AVAILABLE:
             return options
 
         @asynccontextmanager
-        async def _get_lock(self, key):
+        async def _get_lock(self, key: Key):
             """Get lock from a pool of locks based on key."""
             index = hash(key) % self._number_of_locks
             async with (lock := self._locks[index]):
                 yield lock
 
-        async def __call__(self, key, val, *args) -> None:
+        async def __call__(self, key: Key, val: Any, *args: Any) -> None:
             """Call cache to set item."""
             self.__setitem__(key, val)
             await self.pubsub.apublish(self.iterable_key, (key, val))
@@ -126,27 +130,27 @@ if ROCKSDICT_AVAILABLE:
             async for msg in self.pubsub.iter_topic(self.iterable_key):
                 yield msg
 
-        def __contains__(self, key) -> bool:
+        def __contains__(self, key: Key) -> bool:
             """Key exists in db."""
             return key in self.db
 
-        def __delitem__(self, key) -> None:
+        def __delitem__(self, key: Key) -> None:
             """Delete item from db."""
             del self.db[key]
 
-        def __getitem__(self, key) -> Any:
+        def __getitem__(self, key: Union[Key, list[Key]]) -> Any:
             """Get item from db or None."""
             try:
                 return self.db[key]
             except KeyError:
                 pass
 
-        def __setitem__(self, key, val) -> None:
+        def __setitem__(self, key: Key, val: Any) -> None:
             """Set item in db."""
             self.db[key] = val
 
         @asynccontextmanager
-        async def transaction(self, key):
+        async def transaction(self, key: Key):
             """Lock the db entry while using the context manager."""
             async with self._get_lock(key):
                 yield self
@@ -155,7 +159,12 @@ if ROCKSDICT_AVAILABLE:
             """Contextmanager."""
             return self
 
-        def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        def __exit__(
+            self,
+            exc_type: Optional[Type[BaseException]],
+            exc_val: Optional[BaseException],
+            exc_tb: Optional[TracebackType]
+        ) -> None:
             """Exit contextmanager."""
             self.close()
 
@@ -177,8 +186,7 @@ if ROCKSDICT_AVAILABLE:
 
         def get(
             self,
-            key: Union[str, int, float, bytes, bool, List[
-                Union[str, int, float, bytes, bool]]],
+            key: Union[Key, list[Key]],
             default: Any = None,
             read_opt: Union[ReadOptions, None] = None
         ) -> Optional[Any]:
@@ -187,7 +195,7 @@ if ROCKSDICT_AVAILABLE:
 
         def put(
             self,
-            key: Union[str, int, float, bytes, bool],
+            key: Key,
             value: Any,
             write_opt: Union[WriteOptions, None] = None
         ) -> None:
@@ -196,7 +204,7 @@ if ROCKSDICT_AVAILABLE:
 
         def delete(
             self,
-            key: Union[str, int, float, bytes, bool],
+            key: Key,
             write_opt: Union[WriteOptions, None] = None
         ) -> None:
             """Delete item from database."""
@@ -204,9 +212,9 @@ if ROCKSDICT_AVAILABLE:
 
         def key_may_exist(
             self,
-            key: Union[str, int, float, bytes, bool],
+            key: Key,
             fetch: bool = False,
-            read_opt=None
+            read_opt: Optional[ReadOptions] = None
         ) -> Union[bool, Tuple[bool, Any]]:
             """Check if a key exist without performing IO operations."""
             return self.db.key_may_exist(key, fetch, read_opt)
@@ -239,8 +247,8 @@ if ROCKSDICT_AVAILABLE:
         def values(
             self,
             backwards: bool = False,
-            from_key: Union[str, int, float, bytes, bool, None] = None,
-            read_opt: Union[ReadOptions, None] = None
+            from_key: Optional[Key] = None,
+            read_opt: Optional[ReadOptions] = None
         ) -> RdictValues:
             """Get values."""
             return self.db.values(backwards, from_key, read_opt)
@@ -275,8 +283,8 @@ if ROCKSDICT_AVAILABLE:
 
         def delete_range(
             self,
-            begin: Union[str, int, float, bytes, bool],
-            end: Union[str, int, float, bytes, bool],
+            begin: Key,
+            end: Key,
             write_opt: Union[WriteOptions, None] = None
         ) -> None:
             """Delete database items, excluding end."""
@@ -311,8 +319,9 @@ if ROCKSDICT_AVAILABLE:
             return self.db.live_files()
 
         def compact_range(
-            self, begin: Union[str, int, float, bytes, bool, None],
-            end: Union[str, int, float, bytes, bool, None],
+            self,
+            begin: Optional[Key],
+            end: Optional[Key],
             compact_opt: CompactOptions = CompactOptions()
         ) -> None:
             """Run manual compaction on range for the current column family."""
