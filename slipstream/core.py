@@ -7,23 +7,24 @@ from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
     Any,
+    AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
     Generator,
     Iterable,
     Optional,
-    Union,
+    cast,
 )
 
 try:
-    from aiokafka import (
+    from aiokafka import (  # type: ignore
         AIOKafkaClient,
         AIOKafkaConsumer,
         AIOKafkaProducer,
         ConsumerRecord,
     )
-    from aiokafka.helpers import create_ssl_context
+    from aiokafka.helpers import create_ssl_context  # type: ignore
 except ModuleNotFoundError:
     print('Install aiokafka or slipstream-async[kafka]')
     raise
@@ -57,7 +58,7 @@ class Conf(metaclass=Singleton):
 
     pubsub = PubSub()
     topics: list['Topic'] = []
-    iterables: set[tuple[str, AsyncIterable]] = set()
+    iterables: set[tuple[str, AsyncIterable[Any]]] = set()
 
     def register_topic(self, topic: 'Topic'):
         """Add topic to global conf."""
@@ -66,7 +67,7 @@ class Conf(metaclass=Singleton):
     def register_iterable(
         self,
         key: str,
-        it: AsyncIterable
+        it: AsyncIterable[Any]
     ):
         """Add iterable to global Conf."""
         self.iterables.add((key, it))
@@ -99,16 +100,16 @@ class Conf(metaclass=Singleton):
         for t in self.topics:
             await t.shutdown()
 
-    async def _distribute_messages(self, key, it, kwargs):
+    async def _distribute_messages(self, key, it, kwargs: dict[Any, Any]):
         async for msg in it:
             await self.pubsub.apublish(key, msg, **kwargs)
 
-    def __init__(self, conf: dict = {}) -> None:
+    def __init__(self, conf: dict[str, Any] = {}) -> None:
         """Define init behavior."""
         self.conf: dict[str, Any] = {}
         self.__update__(conf)
 
-    def __update__(self, conf: dict = {}):
+    def __update__(self, conf: dict[str, Any] = {}):
         """Set default app configuration."""
         self.conf = {**self.conf, **conf}
         for key, value in conf.items():
@@ -142,7 +143,7 @@ class Topic:
     def __init__(
         self,
         name: str,
-        conf: dict = {},
+        conf: dict[str, Any] = {},
         offset: Optional[int] = None,
         codec: Optional[ICodec] = None,
         dry: bool = False,
@@ -326,7 +327,7 @@ async def _sink_output(
 
 
 def handle(
-    *iterable: AsyncIterable,
+    *iterable: AsyncIterable[Any],
     sink: Iterable[AsyncCallable] = []
 ):
     """Snaps function to stream.
@@ -341,12 +342,13 @@ def handle(
     """
     c = Conf()
 
-    def _deco(f) -> Callable[..., Awaitable[None]]:
+    def _deco(f: AsyncCallable) -> Callable[..., Awaitable[Any]]:
         parameters = signature(f).parameters.values()
         is_coroutine = iscoroutinecallable(f)
         is_asyncgen = isasyncgenfunction(f)
 
-        async def _handler(msg, **kwargs):
+        async def _handler(msg: Any, **kwargs: dict[Any, Any]):
+            """Pass msg depending on user handler function type."""
             if is_coroutine and not is_asyncgen:
                 if any(p.kind == p.VAR_KEYWORD for p in parameters):
                     output = await f(msg, **kwargs)
@@ -358,15 +360,23 @@ def handle(
                 else:
                     output = f(msg) if parameters else f()
 
+            # If function is async generator, loop over yielded values
             if is_asyncgen:
-                async for val in output:
+                async for val in cast(AsyncGenerator[Any], output):
                     for s in sink:
                         await _sink_output(f, s, val)
                 return
 
-            for val in output if isinstance(output, Generator) else [output]:
-                for s in sink:
-                    await _sink_output(f, s, val)
+            # Process regular generator
+            if isinstance(output, Generator):
+                for val in cast(Generator[Any], output):
+                    for s in sink:
+                        await _sink_output(f, s, val)
+                return
+
+            # Process return value
+            for s in sink:
+                await _sink_output(f, s, output)
 
         for it in iterable:
             iterable_key = str(id(it))
@@ -377,7 +387,7 @@ def handle(
     return _deco
 
 
-def stream(**kwargs):
+def stream(**kwargs: dict[Any, Any]):
     """Start the streams.
 
     Ex:
