@@ -30,6 +30,7 @@ except ModuleNotFoundError:
 
 from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import (
+    AsyncCallable,
     PubSub,
     Singleton,
     get_params_names,
@@ -73,10 +74,7 @@ class Conf(metaclass=Singleton):
     def register_handler(
         self,
         key: str,
-        handler: Union[
-            Callable[..., Awaitable[None]],
-            Callable[..., None]
-        ]
+        handler: AsyncCallable
     ):
         """Add handler to global Conf."""
         self.pubsub.subscribe(key, handler)
@@ -308,10 +306,7 @@ class Topic:
 
 async def _sink_output(
     f: Callable,
-    s: Union[
-        Callable[..., Awaitable[None]],
-        Callable[..., None]
-    ],
+    s: AsyncCallable,
     output: Any
 ) -> None:
     is_coroutine = iscoroutinecallable(s)
@@ -332,10 +327,7 @@ async def _sink_output(
 
 def handle(
     *iterable: AsyncIterable,
-    sink: Iterable[Union[
-        Callable[..., Awaitable[None]],
-        Callable[..., None]]
-    ] = []
+    sink: Iterable[AsyncCallable] = []
 ):
     """Snaps function to stream.
 

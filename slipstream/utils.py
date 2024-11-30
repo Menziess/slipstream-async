@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, TypeAlias, Union
 
 logger = logging.getLogger(__name__)
 
-ACallable: TypeAlias = Union[
+AsyncCallable: TypeAlias = Union[
     Callable[..., Awaitable[Any]],
     Callable[..., Any]
 ]
@@ -48,15 +48,15 @@ class Singleton(type):
 class PubSub(metaclass=Singleton):
     """Singleton publish subscribe pattern class."""
 
-    _topics: dict[str, list[ACallable]] = {}
+    _topics: dict[str, list[AsyncCallable]] = {}
 
-    def subscribe(self, topic: str, listener: ACallable) -> None:
+    def subscribe(self, topic: str, listener: AsyncCallable) -> None:
         """Subscribe callable to topic."""
         if topic not in self._topics:
             self._topics[topic] = []
         self._topics[topic].append(listener)
 
-    def unsubscribe(self, topic: str, listener: ACallable) -> None:
+    def unsubscribe(self, topic: str, listener: AsyncCallable) -> None:
         """Unsubscribe callable from topic."""
         if topic in self._topics:
             self._topics[topic].remove(listener)
