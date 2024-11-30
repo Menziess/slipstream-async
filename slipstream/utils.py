@@ -3,7 +3,14 @@
 import logging
 from asyncio import Queue
 from inspect import iscoroutinefunction, signature
-from typing import Any, AsyncIterator, Awaitable, Callable, TypeAlias, Union
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    TypeAlias,
+    Union,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +39,7 @@ class Singleton(type):
 
     _instances: dict['Singleton', Any] = {}
 
-    def __call__(cls, *args: Any, **kwargs: dict[Any, Any]):
+    def __call__(cls, *args: Any, **kwargs: Any):
         """Apply metaclass singleton action."""
         if cls not in cls._instances:
             cls._instances[cls] = super(
@@ -67,7 +74,7 @@ class PubSub(metaclass=Singleton):
         self,
         topic: str,
         *args: Any,
-        **kwargs: dict[Any, Any]
+        **kwargs: Any
     ) -> None:
         """Publish message to subscribers of topic."""
         if topic not in self._topics:
@@ -79,7 +86,7 @@ class PubSub(metaclass=Singleton):
         self,
         topic: str,
         *args: Any,
-        **kwargs: dict[Any, Any]
+        **kwargs: Any
     ) -> None:
         """Publish message to subscribers of topic."""
         if topic not in self._topics:

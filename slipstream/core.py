@@ -80,7 +80,7 @@ class Conf(metaclass=Singleton):
         """Add handler to global Conf."""
         self.pubsub.subscribe(key, handler)
 
-    async def start(self, **kwargs: dict[Any, Any]):
+    async def start(self, **kwargs: Any):
         """Start processing registered iterables."""
         try:
             await gather(*[
@@ -104,7 +104,7 @@ class Conf(metaclass=Singleton):
         self,
         key: str,
         it: AsyncIterable[Any],
-        kwargs: dict[Any, Any]
+        kwargs: Any
     ):
         async for msg in it:
             await self.pubsub.apublish(key, msg, **kwargs)
@@ -237,7 +237,7 @@ class Topic:
         key: Any,
         value: Any,
         headers: Optional[dict[str, str]] = None,
-        **kwargs: dict[Any, Any]
+        **kwargs: Any
     ) -> None:
         """Produce message to topic."""
         if isinstance(key, str) and not self.conf.get('key_serializer'):
@@ -353,7 +353,7 @@ def handle(
         is_coroutine = iscoroutinecallable(f)
         is_asyncgen = isasyncgenfunction(f)
 
-        async def _handler(msg: Any, **kwargs: dict[Any, Any]):
+        async def _handler(msg: Any, **kwargs: Any):
             """Pass msg depending on user handler function type."""
             if is_coroutine and not is_asyncgen:
                 if any(p.kind == p.VAR_KEYWORD for p in parameters):
@@ -393,7 +393,7 @@ def handle(
     return _deco
 
 
-def stream(**kwargs: dict[Any, Any]):
+def stream(**kwargs: Any):
     """Start the streams.
 
     Ex:
