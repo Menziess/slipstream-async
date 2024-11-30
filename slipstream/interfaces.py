@@ -1,7 +1,9 @@
 """Slipstream interfaces."""
 
 from abc import ABCMeta, abstractmethod
-from typing import Any
+from typing import Any, TypeAlias, Union
+
+Key: TypeAlias = str | int | float | bytes | bool
 
 
 class ICodec(metaclass=ABCMeta):
@@ -22,26 +24,26 @@ class ICache(metaclass=ABCMeta):
     """Base class for cache implementations."""
 
     @abstractmethod
-    async def __call__(self, key, val) -> None:
+    async def __call__(self, key: Key, val: Any) -> None:
         """Call cache to set item."""
         raise NotImplementedError
 
     @abstractmethod
-    def __contains__(self, key) -> bool:
+    def __contains__(self, key: Key) -> bool:
         """Key exists in db."""
         raise NotImplementedError
 
     @abstractmethod
-    def __delitem__(self, key) -> None:
+    def __delitem__(self, key: Key) -> None:
         """Delete item from db."""
         raise NotImplementedError
 
     @abstractmethod
-    def __getitem__(self, key) -> Any:
+    def __getitem__(self, key: Union[Key, list[Key]]) -> Any:
         """Get item from db or None."""
         raise NotImplementedError
 
     @abstractmethod
-    def __setitem__(self, key, val) -> None:
+    def __setitem__(self, key: Key, val: Any) -> None:
         """Set item in db."""
         raise NotImplementedError
