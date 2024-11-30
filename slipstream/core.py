@@ -38,7 +38,7 @@ from slipstream.utils import (
     iscoroutinecallable,
 )
 
-KAFKA_CLASSES_PARAMS = {
+KAFKA_CLASSES_PARAMS: dict[str, Any] = {
     **get_params_names(AIOKafkaConsumer),
     **get_params_names(AIOKafkaProducer),
     **get_params_names(AIOKafkaClient),
@@ -100,7 +100,12 @@ class Conf(metaclass=Singleton):
         for t in self.topics:
             await t.shutdown()
 
-    async def _distribute_messages(self, key, it, kwargs: dict[Any, Any]):
+    async def _distribute_messages(
+        self,
+        key: str,
+        it: AsyncIterable[Any],
+        kwargs: dict[Any, Any]
+    ):
         async for msg in it:
             await self.pubsub.apublish(key, msg, **kwargs)
 
@@ -229,10 +234,10 @@ class Topic:
 
     async def __call__(
         self,
-        key,
-        value,
+        key: Any,
+        value: Any,
         headers: Optional[dict[str, str]] = None,
-        **kwargs
+        **kwargs: dict[Any, Any]
     ) -> None:
         """Produce message to topic."""
         if isinstance(key, str) and not self.conf.get('key_serializer'):
@@ -265,11 +270,12 @@ class Topic:
             )
             raise
 
-    async def __aiter__(self) -> AsyncIterator[ConsumerRecord]:
+    async def __aiter__(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
         """Iterate over messages from topic."""
         if not self.consumer:
             self.consumer = await self.get_consumer()
         try:
+            msg: ConsumerRecord[Any, Any]
             async for msg in self.consumer:
                 if (
                     isinstance(msg.key, bytes)
@@ -306,7 +312,7 @@ class Topic:
 
 
 async def _sink_output(
-    f: Callable,
+    f: Callable[..., Any],
     s: AsyncCallable,
     output: Any
 ) -> None:
