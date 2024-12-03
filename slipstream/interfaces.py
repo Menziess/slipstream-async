@@ -3,7 +3,7 @@
 from abc import ABCMeta, abstractmethod
 from typing import Any, TypeAlias, Union
 
-Key: TypeAlias = str | int | float | bytes | bool
+Key: TypeAlias = str | int | float | bytes | bool | None
 
 
 class ICodec(metaclass=ABCMeta):

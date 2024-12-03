@@ -7,7 +7,6 @@ from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
     Any,
-    AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -368,7 +367,7 @@ def handle(
 
             # If function is async generator, loop over yielded values
             if is_asyncgen:
-                async for val in cast(AsyncGenerator[Any], output):
+                async for val in cast(AsyncIterator[Any], output):
                     for s in sink:
                         await _sink_output(f, s, val)
                 return
