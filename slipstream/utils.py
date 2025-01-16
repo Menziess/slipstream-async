@@ -9,15 +9,11 @@ from typing import (
     Awaitable,
     Callable,
     TypeAlias,
-    Union,
 )
 
 logger = logging.getLogger(__name__)
 
-AsyncCallable: TypeAlias = Union[
-    Callable[..., Awaitable[Any]],
-    Callable[..., Any]
-]
+AsyncCallable: TypeAlias = Callable[..., Awaitable[Any]] | Callable[..., Any]
 
 
 def iscoroutinecallable(o: Any) -> bool:
