@@ -111,7 +111,7 @@ class Conf(metaclass=Singleton):
         while True:
             try:
                 msg = await it.asend(is_active)
-                if msg:
+                if msg is not None:
                     await self.pubsub.apublish(key, msg, **kwargs)
                 is_active = True
             except StopAsyncIteration:
