@@ -7,6 +7,7 @@ from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
     Any,
+    AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -105,8 +106,16 @@ class Conf(metaclass=Singleton):
         it: AsyncIterable[Any],
         kwargs: Any
     ):
-        async for msg in it:
-            await self.pubsub.apublish(key, msg, **kwargs)
+        is_active = None
+        it = cast(AsyncGenerator[Any, bool | None], it)
+        while True:
+            try:
+                msg = await it.asend(is_active)
+                if msg:
+                    await self.pubsub.apublish(key, msg, **kwargs)
+                is_active = True
+            except StopAsyncIteration:
+                break
 
     def __init__(self, conf: dict[str, Any] = {}) -> None:
         """Define init behavior."""
@@ -163,6 +172,9 @@ class Topic:
 
         self.consumer: Optional[AIOKafkaConsumer] = None
         self.producer: Optional[AIOKafkaProducer] = None
+        self._generator: Optional[
+            AsyncIterator[ConsumerRecord[Any, Any]]
+        ] = None
 
         if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
             logger.warning(
@@ -269,35 +281,65 @@ class Topic:
             )
             raise
 
-    async def __aiter__(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
+    async def init_generator(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
         """Iterate over messages from topic."""
         if not self.consumer:
             self.consumer = await self.get_consumer()
-        try:
-            msg: ConsumerRecord[Any, Any]
-            async for msg in self.consumer:
-                if (
-                    isinstance(msg.key, bytes)
-                    and not self.conf.get('key_deserializer')
-                ):
-                    msg.key = msg.key.decode()
-                if (
-                    isinstance(msg.value, bytes)
-                    and not self.conf.get('value_deserializer')
-                ):
-                    msg.value = msg.value.decode()
-                yield msg
-        except Exception as e:
-            logger.error(
-                f'Error raised while consuming from Topic {self.name}: '
-                f'{e.args[0]}' if e.args else ''
-            )
-            raise
+
+        async def generator(consumer: AIOKafkaConsumer):
+            try:
+                msg: ConsumerRecord[Any, Any]
+                async for msg in consumer:
+                    if (
+                        isinstance(msg.key, bytes)
+                        and not self.conf.get('key_deserializer')
+                    ):
+                        msg.key = msg.key.decode()
+                    if (
+                        isinstance(msg.value, bytes)
+                        and not self.conf.get('value_deserializer')
+                    ):
+                        msg.value = msg.value.decode()
+                    yield msg
+            except Exception as e:
+                logger.error(
+                    f'Error raised while consuming from Topic {self.name}: '
+                    f'{e.args[0]}' if e.args else ''
+                )
+                raise
+
+        if not self._generator:
+            self._generator = generator(self.consumer)
+        return self._generator
+
+    async def __aiter__(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
+        """Iterate over messages from topic."""
+        if not self._generator:
+            await self.init_generator()
+        if not self._generator:
+            raise RuntimeError('Topic generator was unset.')
+        async for msg in self._generator:
+            yield msg
+
+    async def asend(self, value):
+        """Send data to generator."""
+        if not self._generator:
+            await self.init_generator()
+        if not self._generator:
+            raise RuntimeError('Topic generator was unset.')
+        generator = cast(
+            AsyncGenerator[ConsumerRecord[Any, Any], bool | None],
+            self._generator
+        )
+        return await generator.asend(value)
 
     async def __next__(self):
         """Get the next message from topic."""
-        iterator = self.__aiter__()
-        return await anext(iterator)
+        if not self._generator:
+            await self.init_generator()
+        if not self._generator:
+            raise RuntimeError('Topic generator was unset.')
+        return await anext(self._generator)
 
     async def shutdown(self):
         """Cleanup and finalization."""
@@ -374,7 +416,7 @@ def handle(
 
             # Process regular generator
             if isinstance(output, Generator):
-                for val in cast(Generator[Any], output):
+                for val in cast(Generator[Any, Any, Any], output):
                     for s in sink:
                         await _sink_output(f, s, val)
                 return
