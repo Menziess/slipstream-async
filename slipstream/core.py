@@ -46,6 +46,15 @@ KAFKA_CLASSES_PARAMS: dict[str, Any] = {
 READ_FROM_START = -2
 READ_FROM_END = -1
 
+
+class SentinelType:
+    """Unique type to signal no yield value."""
+
+    pass
+
+
+SENTINEL = SentinelType()
+
 logger = logging.getLogger(__name__)
 
 
@@ -111,7 +120,7 @@ class Conf(metaclass=Singleton):
         while True:
             try:
                 msg = await it.asend(is_active)
-                if msg is not None:
+                if not isinstance(msg, SentinelType):
                     await self.pubsub.apublish(key, msg, **kwargs)
                 is_active = True
             except StopAsyncIteration:
@@ -173,7 +182,10 @@ class Topic:
         self.consumer: Optional[AIOKafkaConsumer] = None
         self.producer: Optional[AIOKafkaProducer] = None
         self._generator: Optional[
-            AsyncIterator[ConsumerRecord[Any, Any]]
+            AsyncGenerator[
+                SentinelType | ConsumerRecord[Any, Any],
+                bool | None
+            ]
         ] = None
 
         if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
@@ -281,15 +293,26 @@ class Topic:
             )
             raise
 
-    async def init_generator(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
+    async def init_generator(self) -> AsyncGenerator[
+        SentinelType | ConsumerRecord[Any, Any],
+        bool | None
+    ]:
         """Iterate over messages from topic."""
         if not self.consumer:
             self.consumer = await self.get_consumer()
 
         async def generator(consumer: AIOKafkaConsumer):
+            is_active = True
             try:
                 msg: ConsumerRecord[Any, Any]
                 async for msg in consumer:
+                    if not is_active:
+                        while True:
+                            active = yield SENTINEL
+                            if active:
+                                logger.debug(f'{self.name} activated')
+                                break
+                            await sleep(1)
                     if (
                         isinstance(msg.key, bytes)
                         and not self.conf.get('key_deserializer')
@@ -300,7 +323,7 @@ class Topic:
                         and not self.conf.get('value_deserializer')
                     ):
                         msg.value = msg.value.decode()
-                    yield msg
+                    active = yield msg
             except Exception as e:
                 logger.error(
                     f'Error raised while consuming from Topic {self.name}: '
@@ -319,7 +342,8 @@ class Topic:
         if not self._generator:
             raise RuntimeError('Topic generator was unset.')
         async for msg in self._generator:
-            yield msg
+            if not isinstance(msg, SentinelType):
+                yield msg
 
     async def asend(self, value):
         """Send data to generator."""
@@ -339,7 +363,9 @@ class Topic:
             await self.init_generator()
         if not self._generator:
             raise RuntimeError('Topic generator was unset.')
-        return await anext(self._generator)
+        while isinstance(msg := await anext(self._generator), SentinelType):
+            continue
+        return msg
 
     async def shutdown(self):
         """Cleanup and finalization."""
