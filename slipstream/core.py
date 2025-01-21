@@ -115,16 +115,21 @@ class Conf(metaclass=Singleton):
         it: AsyncIterable[Any],
         kwargs: Any
     ):
-        is_active = None
-        it = cast(AsyncGenerator[Any, bool | None], it)
-        while True:
-            try:
-                msg = await it.asend(is_active)
-                if not isinstance(msg, SentinelType):
-                    await self.pubsub.apublish(key, msg, **kwargs)
-                is_active = True
-            except StopAsyncIteration:
-                break
+        """Send signal to hint stream should be active if `it` supports it."""
+        if hasattr(it, 'asend'):
+            it = cast(AsyncGenerator[Any, bool | None], it)
+            is_active = None
+            while True:
+                try:
+                    msg = await it.asend(is_active)
+                    if not isinstance(msg, SentinelType):
+                        await self.pubsub.apublish(key, msg, **kwargs)
+                    is_active = True
+                except StopAsyncIteration:
+                    break
+        else:
+            async for msg in it:
+                await self.pubsub.apublish(key, msg, **kwargs)
 
     def __init__(self, conf: dict[str, Any] = {}) -> None:
         """Define init behavior."""
