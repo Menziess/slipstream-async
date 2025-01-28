@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import gather, sleep
+from asyncio import gather, sleep, wait_for
 from collections.abc import AsyncIterable
 from inspect import isasyncgenfunction, signature
 from re import sub
@@ -56,12 +56,8 @@ class Conf(metaclass=Singleton):
     """
 
     pubsub = PubSub()
-    topics: list['Topic'] = []
     iterables: set[tuple[str, AsyncIterable[Any]]] = set()
-
-    def register_topic(self, topic: 'Topic'):
-        """Add topic to global conf."""
-        self.topics.append(topic)
+    exit_hooks: set[AsyncCallable] = set()
 
     def register_iterable(
         self,
@@ -79,6 +75,13 @@ class Conf(metaclass=Singleton):
         """Add handler to global Conf."""
         self.pubsub.subscribe(key, handler)
 
+    def register_exit_hook(
+        self,
+        exit_hook: AsyncCallable
+    ):
+        """Add exit hook that's called on shutdown."""
+        self.exit_hooks.add(exit_hook)
+
     async def start(self, **kwargs: Any):
         """Start processing registered iterables."""
         try:
@@ -92,12 +95,11 @@ class Conf(metaclass=Singleton):
             await self._shutdown()
 
     async def _shutdown(self) -> None:
-        # When the program immediately crashes give chance for topic
-        # consumer and producer to be fully initialized before
-        # shutting them down
+        # When the program immediately crashes give chance for objects
+        # to be fully initialized before shutting them down
         await sleep(0.05)
-        for t in self.topics:
-            await t.shutdown()
+        for hook in self.exit_hooks:
+            await hook()
 
     async def _distribute_messages(
         self,
@@ -154,7 +156,7 @@ class Topic:
     ):
         """Create topic instance to produce and consume messages."""
         c = Conf()
-        c.register_topic(self)
+        c.register_exit_hook(self.exit_hook)
         self.name = name
         self.conf = {**c.conf, **conf}
         self.starting_offset = offset
@@ -299,14 +301,14 @@ class Topic:
         iterator = self.__aiter__()
         return await anext(iterator)
 
-    async def shutdown(self):
+    async def exit_hook(self):
         """Cleanup and finalization."""
         for client in (self.consumer, self.producer):
             if not client:
                 continue
             try:
-                await client.stop()
-            except RuntimeError:
+                await wait_for(client.stop(), timeout=10)
+            except TimeoutError:
                 pass
 
 
