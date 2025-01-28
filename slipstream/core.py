@@ -294,7 +294,7 @@ class Topic:
         except Exception as e:
             logger.error(
                 f'Error raised while producing to Topic {self.name}: '
-                f'{e.args[0]}' if e.args else ''
+                f'{e.args[0] if e.args else ""}'
             )
             raise
 
@@ -332,7 +332,7 @@ class Topic:
             except Exception as e:
                 logger.error(
                     f'Error raised while consuming from Topic {self.name}: '
-                    f'{e.args[0]}' if e.args else ''
+                    f'{e.args[0] if e.args else ""}'
                 )
                 raise
 
