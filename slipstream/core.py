@@ -91,6 +91,9 @@ class Conf(metaclass=Singleton):
             ])
         except KeyboardInterrupt:
             pass
+        except Exception as e:
+            logger.critical(e)
+            raise
         finally:
             await self._shutdown()
 
@@ -309,7 +312,10 @@ class Topic:
             try:
                 await wait_for(client.stop(), timeout=10)
             except TimeoutError:
-                pass
+                logger.critical(
+                    f'Client for topic "{self.name}" failed '
+                    f'to shut down gracefully: {client}'
+                )
 
 
 async def _sink_output(
