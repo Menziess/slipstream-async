@@ -320,7 +320,7 @@ class Topic:
                         while True:
                             active = yield SENTINEL
                             if active:
-                                logger.debug(f'{self.name} activated')
+                                logger.debug(f'{self.name} reactivated')
                                 break
                             await sleep(1)
                     if (
