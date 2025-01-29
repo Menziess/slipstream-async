@@ -382,7 +382,7 @@ def handle(
 
             # Process regular generator
             if isinstance(output, Generator):
-                for val in cast(Generator[Any], output):
+                for val in cast(Generator[Any, Any, Any], output):
                     for s in sink:
                         await _sink_output(f, s, val)
                 return
