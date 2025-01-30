@@ -387,7 +387,12 @@ class Topic:
             except TimeoutError:
                 logger.critical(
                     f'Client for topic "{self.name}" failed '
-                    f'to shut down gracefully: {client}'
+                    f'to shut down in time {client}'
+                )
+            except Exception as e:
+                logger.critical(
+                    f'Client for topic "{self.name}" failed '
+                    f'to shut down gracefully {client}: {e}'
                 )
 
 
