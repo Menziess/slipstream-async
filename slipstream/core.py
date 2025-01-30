@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import gather, sleep, wait_for
+from asyncio import Queue, QueueEmpty, gather, sleep, wait_for
 from collections.abc import AsyncIterable
 from inspect import isasyncgenfunction, signature
 from re import sub
@@ -58,6 +58,59 @@ SENTINEL = SentinelType()
 logger = logging.getLogger(__name__)
 
 
+class PausableStream:
+    """Can signal source iterable to pausse."""
+
+    def __init__(self, it: AsyncIterable[Any]):
+        """Create instance that holds iterable and queue to pause it."""
+        self._it = it
+        self._queue = Queue(maxsize=1)
+
+    def pause(self):
+        """Send signal to pause stream."""
+        if self._queue.full():
+            self._queue.get_nowait()
+        self._queue.put_nowait(False)
+
+    def proceed(self):
+        """Send signal to proceed stream."""
+        if self._queue.full():
+            self._queue.get_nowait()
+        self._queue.put_nowait(True)
+
+    async def __aiter__(self) -> AsyncIterator[Any]:
+        """Consume iterator while it's not paused."""
+        is_active = None
+        if hasattr(self._it, 'asend'):
+            it = cast(AsyncGenerator[Any, bool | None], self._it)
+            while True:
+                try:
+                    if is_active in (None, True):
+                        msg = await it.asend(is_active)
+                        if not isinstance(msg, SentinelType):
+                            yield msg
+                    else:
+                        await sleep(0.1)
+                    try:
+                        is_active = self._queue.get_nowait()
+                    except QueueEmpty:
+                        pass
+                except StopAsyncIteration:
+                    break
+        else:
+            async for msg in self._it:
+                yield msg
+                while True:
+                    try:
+                        is_active = self._queue.get_nowait()
+                    except QueueEmpty:
+                        pass
+                    if is_active in (None, True):
+                        break
+                    else:
+                        await sleep(0.1)
+
+
 class Conf(metaclass=Singleton):
     """Define default kafka configuration, optionally.
 
@@ -66,7 +119,7 @@ class Conf(metaclass=Singleton):
     """
 
     pubsub = PubSub()
-    iterables: set[tuple[str, AsyncIterable[Any]]] = set()
+    iterables: dict[str, PausableStream] = {}
     exit_hooks: set[AsyncCallable] = set()
 
     def register_iterable(
@@ -75,7 +128,7 @@ class Conf(metaclass=Singleton):
         it: AsyncIterable[Any]
     ):
         """Add iterable to global Conf."""
-        self.iterables.add((key, it))
+        self.iterables[key] = PausableStream(it)
 
     def register_handler(
         self,
@@ -96,8 +149,8 @@ class Conf(metaclass=Singleton):
         """Start processing registered iterables."""
         try:
             await gather(*[
-                self._distribute_messages(key, it, kwargs)
-                for key, it in self.iterables
+                self._distribute_messages(key, pausable_stream, kwargs)
+                for key, pausable_stream in self.iterables.items()
             ])
         except KeyboardInterrupt:
             pass
@@ -108,6 +161,7 @@ class Conf(metaclass=Singleton):
             await self._shutdown()
 
     async def _shutdown(self) -> None:
+        """Call exit hooks."""
         # When the program immediately crashes give chance for objects
         # to be fully initialized before shutting them down
         await sleep(0.05)
@@ -117,24 +171,12 @@ class Conf(metaclass=Singleton):
     async def _distribute_messages(
         self,
         key: str,
-        it: AsyncIterable[Any],
+        pausable_stream: PausableStream,
         kwargs: Any
     ):
-        """Send signal to hint stream should be active if `it` supports it."""
-        if hasattr(it, 'asend'):
-            it = cast(AsyncGenerator[Any, bool | None], it)
-            is_active = None
-            while True:
-                try:
-                    msg = await it.asend(is_active)
-                    if not isinstance(msg, SentinelType):
-                        await self.pubsub.apublish(key, msg, **kwargs)
-                    is_active = True
-                except StopAsyncIteration:
-                    break
-        else:
-            async for msg in it:
-                await self.pubsub.apublish(key, msg, **kwargs)
+        """Publish messages from stream."""
+        async for msg in pausable_stream:
+            await self.pubsub.apublish(key, msg, **kwargs)
 
     def __init__(self, conf: dict[str, Any] = {}) -> None:
         """Define init behavior."""

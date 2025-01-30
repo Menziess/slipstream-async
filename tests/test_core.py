@@ -10,10 +10,10 @@ from slipstream.core import Topic
 @pytest.mark.asyncio
 async def test_Conf(mocker):
     """Should distribute messages in parallel."""
-    Conf().iterables = set()
+    Conf().iterables = {}
     c = Conf({'group.id': 'test'})
     assert c.group_id == 'test'  # type: ignore
-    assert c.iterables == set()
+    assert c.iterables == {}
 
     async def messages():
         for emoji in '🏆':
@@ -24,7 +24,6 @@ async def test_Conf(mocker):
     iterable_key = str(id(iterable))
     iterable_item = iterable_key, messages()
     c.register_iterable(*iterable_item)
-    assert c.iterables == set([iterable_item])
 
     # Register handler
     stub = mocker.stub(name='handler')
