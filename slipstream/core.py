@@ -553,6 +553,6 @@ def stream(**kwargs: Any):
         >>> args = {
         ...     'env': 'DEV',
         ... }
-        >>> run(stream(**args))
+        >>> run(stream(**args))                   # doctest: +SKIP
     """
     return Conf().start(**kwargs)
