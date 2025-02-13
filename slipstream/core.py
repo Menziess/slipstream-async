@@ -49,7 +49,7 @@ READ_FROM_START = -2
 READ_FROM_END = -1
 
 
-class SignalStream(Enum):
+class Signal(Enum):
     """Signals can be exchanged with streams.
 
     SENTINEL represents an absent yield value
@@ -71,32 +71,32 @@ class PausableStream:
     def __init__(self, it: AsyncIterable[Any]):
         """Create instance that holds iterable and queue to pause it."""
         self._it = it
-        self._queue: Queue[SignalStream | Any] = Queue(maxsize=1)
+        self._signal_queue: Queue[Signal | Any] = Queue(maxsize=1)
+        self.signal = None
 
-    def signal(self, signal: SignalStream | Any) -> None:
+    def send_signal(self, signal: Signal | Any) -> None:
         """Send signal to stream."""
-        if self._queue.full():
-            self._queue.get_nowait()
-        self._queue.put_nowait(signal)
+        if self._signal_queue.full():
+            self._signal_queue.get_nowait()
+        self._signal_queue.put_nowait(signal)
 
     async def __aiter__(self) -> AsyncIterator[Any]:
         """Consume iterator while it's not paused."""
-        signal = None
         if hasattr(self._it, 'asend'):
-            it = cast(AsyncGenerator[Any, SignalStream | Any], self._it)
+            it = cast(AsyncGenerator[Any, Signal | Any], self._it)
             while True:
                 try:
                     try:
-                        signal = self._queue.get_nowait()
+                        self.signal = self._signal_queue.get_nowait()
                     except QueueEmpty:
                         pass
-                    msg = await it.asend(signal)
-                    if msg is not SignalStream.SENTINEL:
+                    msg = await it.asend(self.signal)
+                    if msg is not Signal.SENTINEL:
                         yield msg
-                    while signal is SignalStream.PAUSE:
+                    while self.signal is Signal.PAUSE:
                         await sleep(0.1)
                         try:
-                            signal = self._queue.get_nowait()
+                            self.signal = self._signal_queue.get_nowait()
                         except QueueEmpty:
                             pass
                 except StopAsyncIteration:
@@ -106,10 +106,10 @@ class PausableStream:
                 yield msg
                 while True:
                     try:
-                        signal = self._queue.get_nowait()
+                        self.signal = self._signal_queue.get_nowait()
                     except QueueEmpty:
                         pass
-                    if signal is SignalStream.PAUSE:
+                    if self.signal is Signal.PAUSE:
                         await sleep(0.1)
                     else:
                         break
@@ -239,7 +239,7 @@ class Topic:
         self.producer: Optional[AIOKafkaProducer] = None
         self._generator: Optional[
             AsyncGenerator[
-                Literal[SignalStream.SENTINEL] | ConsumerRecord[Any, Any],
+                Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
                 bool | None
             ]
         ] = None
@@ -350,7 +350,7 @@ class Topic:
             raise
 
     async def init_generator(self) -> AsyncGenerator[
-        Literal[SignalStream.SENTINEL] | ConsumerRecord[Any, Any],
+        Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
         bool | None
     ]:
         """Iterate over messages from topic."""
@@ -362,11 +362,11 @@ class Topic:
             try:
                 msg: ConsumerRecord[Any, Any]
                 async for msg in consumer:
-                    if signal is SignalStream.PAUSE:
+                    if signal is Signal.PAUSE:
                         consumer.pause(*consumer.assignment())
                         while True:
-                            signal = yield SignalStream.SENTINEL
-                            if signal is SignalStream.RESUME:
+                            signal = yield Signal.SENTINEL
+                            if signal is Signal.RESUME:
                                 logger.debug(f'{self.name} reactivated')
                                 consumer.resume(*consumer.assignment())
                                 break
@@ -400,7 +400,7 @@ class Topic:
         if not self._generator:
             raise RuntimeError('Topic generator was unset.')
         async for msg in self._generator:
-            if msg is not SignalStream.SENTINEL:
+            if msg is not Signal.SENTINEL:
                 yield msg
 
     async def asend(self, value) -> ConsumerRecord[Any, Any]:
@@ -410,7 +410,7 @@ class Topic:
         if not self._generator:
             raise RuntimeError('Topic generator was unset.')
         generator = cast(
-            AsyncGenerator[ConsumerRecord[Any, Any], SignalStream | None],
+            AsyncGenerator[ConsumerRecord[Any, Any], Signal | None],
             self._generator
         )
         return await generator.asend(value)
@@ -421,7 +421,7 @@ class Topic:
             await self.init_generator()
         if not self._generator:
             raise RuntimeError('Topic generator was unset.')
-        while (msg := await anext(self._generator)) is SignalStream.SENTINEL:
+        while (msg := await anext(self._generator)) is Signal.SENTINEL:
             continue
         return msg
 
