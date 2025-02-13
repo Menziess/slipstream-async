@@ -125,16 +125,19 @@ class Conf(metaclass=Singleton):
     ...     for emoji in '🏆📞🐟👌':
     ...         yield emoji
 
-    >>> handle(messages(), sink=[print])
+    >>> @handle(messages(), sink=[print])
+    ... def handle_message(msg):
+    ...     yield f'Hello {msg}!'
 
     Set application kafka configuration (optional):
-    >>> c = Conf({'bootstrap_servers': 'localhost:29091'})
+    >>> Conf({'bootstrap_servers': 'localhost:29091'})
     {'bootstrap_servers': 'localhost:29091'}
 
     Provide exit hooks:
-    >>> def exit_hook():
+    >>> async def exit_hook():
     ...     print('Shutting down application.')
 
+    >>> c = Conf()
     >>> c.register_exit_hook(exit_hook)
     """
 
