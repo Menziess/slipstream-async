@@ -116,10 +116,26 @@ class PausableStream:
 
 
 class Conf(metaclass=Singleton):
-    """Define default kafka configuration, optionally.
+    """The application configuration singleton.
 
-    >>> Conf({'bootstrap_servers': 'localhost:29091'})
+    Register iterables (sources) and handlers (sinks):
+    >>> from slipstream import handle
+
+    >>> async def messages():
+    ...     for emoji in '🏆📞🐟👌':
+    ...         yield emoji
+
+    >>> handle(messages(), sink=[print])
+
+    Set application kafka configuration (optional):
+    >>> c = Conf({'bootstrap_servers': 'localhost:29091'})
     {'bootstrap_servers': 'localhost:29091'}
+
+    Provide exit hooks:
+    >>> def exit_hook():
+    ...     print('Shutting down application.')
+
+    >>> c.register_exit_hook(exit_hook)
     """
 
     pubsub = PubSub()
