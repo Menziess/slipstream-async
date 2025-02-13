@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import Queue, QueueEmpty, gather, sleep, wait_for
+from asyncio import gather, sleep, wait_for
 from collections.abc import AsyncIterable
 from enum import Enum
 from inspect import isasyncgenfunction, signature
@@ -66,19 +66,27 @@ logger = logging.getLogger(__name__)
 
 
 class PausableStream:
-    """Can signal source stream to pause."""
+    """Can signal source stream to pause.
+
+    If the provided iterable is of AsyncGenerator type, it will receive
+    the signal through the yield send syntax, allowing it to deal with
+    the situation appropriately.
+
+    For example, the Topic class has a chance to pause the Consumer.
+
+    Any value can be sent as a Signal, but only Signal.PAUSE will trigger
+    a pause in consumption of the iterable in PausableStream. Any other
+    value will resume the PausableStream.
+    """
 
     def __init__(self, it: AsyncIterable[Any]):
         """Create instance that holds iterable and queue to pause it."""
         self._it = it
-        self._signal_queue: Queue[Signal | Any] = Queue(maxsize=1)
-        self.signal = None
+        self.signal: Signal | Any = None
 
     def send_signal(self, signal: Signal | Any) -> None:
         """Send signal to stream."""
-        if self._signal_queue.full():
-            self._signal_queue.get_nowait()
-        self._signal_queue.put_nowait(signal)
+        self.signal = signal
 
     async def __aiter__(self) -> AsyncIterator[Any]:
         """Consume iterator while it's not paused."""
@@ -86,29 +94,17 @@ class PausableStream:
             it = cast(AsyncGenerator[Any, Signal | Any], self._it)
             while True:
                 try:
-                    try:
-                        self.signal = self._signal_queue.get_nowait()
-                    except QueueEmpty:
-                        pass
                     msg = await it.asend(self.signal)
                     if msg is not Signal.SENTINEL:
                         yield msg
                     while self.signal is Signal.PAUSE:
                         await sleep(0.1)
-                        try:
-                            self.signal = self._signal_queue.get_nowait()
-                        except QueueEmpty:
-                            pass
                 except StopAsyncIteration:
                     break
         else:
             async for msg in self._it:
                 yield msg
                 while True:
-                    try:
-                        self.signal = self._signal_queue.get_nowait()
-                    except QueueEmpty:
-                        pass
                     if self.signal is Signal.PAUSE:
                         await sleep(0.1)
                     else:
