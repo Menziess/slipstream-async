@@ -13,7 +13,6 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    Union,
 )
 
 from slipstream.interfaces import ICache, Key
@@ -63,7 +62,7 @@ if rocksdict_available:
             self,
             path: str,
             options: Optional[Options] = None,
-            column_families: Union[Dict[str, Options], None] = None,
+            column_families: Dict[str, Options] | None = None,
             access_type: AccessType = AccessType.read_write(),
             target_table_size: int = 25 * MB,
             number_of_locks: int = 16
@@ -138,7 +137,7 @@ if rocksdict_available:
             """Delete item from db."""
             del self.db[key]
 
-        def __getitem__(self, key: Union[Key, list[Key]]) -> Any:
+        def __getitem__(self, key: Key | list[Key]) -> Any:
             """Get item from db or None."""
             try:
                 return self.db[key]
@@ -186,9 +185,9 @@ if rocksdict_available:
 
         def get(
             self,
-            key: Union[Key, list[Key]],
+            key: Key | list[Key],
             default: Any = None,
-            read_opt: Union[ReadOptions, None] = None
+            read_opt: ReadOptions | None = None
         ) -> Optional[Any]:
             """Get item from database by key."""
             return self.db.get(key, default, read_opt)
@@ -197,7 +196,7 @@ if rocksdict_available:
             self,
             key: Key,
             value: Any,
-            write_opt: Union[WriteOptions, None] = None
+            write_opt: WriteOptions | None = None
         ) -> None:
             """Put item in database using key."""
             return self.db.put(key, value, write_opt)
@@ -205,7 +204,7 @@ if rocksdict_available:
         def delete(
             self,
             key: Key,
-            write_opt: Union[WriteOptions, None] = None
+            write_opt: WriteOptions | None = None
         ) -> None:
             """Delete item from database."""
             return self.db.delete(key, write_opt)
@@ -215,13 +214,13 @@ if rocksdict_available:
             key: Key,
             fetch: bool = False,
             read_opt: Optional[ReadOptions] = None
-        ) -> Union[bool, Tuple[bool, Any]]:
+        ) -> bool | Tuple[bool, Any]:
             """Check if a key exist without performing IO operations."""
             return self.db.key_may_exist(key, fetch, read_opt)
 
         def iter(
             self,
-            read_opt: Union[ReadOptions, None] = None
+            read_opt: ReadOptions | None = None
         ) -> RdictIter:
             """Get iterable."""
             return self.db.iter(read_opt)
@@ -229,8 +228,8 @@ if rocksdict_available:
         def items(
             self,
             backwards: bool = False,
-            from_key: Union[str, int, float, bytes, bool, None] = None,
-            read_opt: Union[ReadOptions, None] = None
+            from_key: str | int | float | bytes | bool | None = None,
+            read_opt: ReadOptions | None = None
         ) -> RdictItems:
             """Get tuples of key-value pairs."""
             return self.db.items(backwards, from_key, read_opt)
@@ -238,8 +237,8 @@ if rocksdict_available:
         def keys(
             self,
             backwards: bool = False,
-            from_key: Union[str, int, float, bytes, bool, None] = None,
-            read_opt: Union[ReadOptions, None] = None
+            from_key: str | int | float | bytes | bool | None = None,
+            read_opt: ReadOptions | None = None
         ) -> RdictKeys:
             """Get keys."""
             return self.db.keys(backwards, from_key, read_opt)
@@ -285,7 +284,7 @@ if rocksdict_available:
             self,
             begin: Key,
             end: Key,
-            write_opt: Union[WriteOptions, None] = None
+            write_opt: WriteOptions | None = None
         ) -> None:
             """Delete database items, excluding end."""
             return self.db.delete_range(begin, end, write_opt)
@@ -302,11 +301,11 @@ if rocksdict_available:
             """Set options for current column family."""
             return self.db.set_options(options)
 
-        def property_value(self, name: str) -> Union[str, None]:
+        def property_value(self, name: str) -> str | None:
             """Get property by name from current column family."""
             return self.db.property_value(name)
 
-        def property_int_value(self, name: str) -> Union[int, None]:
+        def property_int_value(self, name: str) -> int | None:
             """Get property as int by name from current column family."""
             return self.db.property_int_value(name)
 
