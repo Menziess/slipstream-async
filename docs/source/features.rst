@@ -44,6 +44,10 @@ Cache
 
 Cache can be used to persist data.
 
+Install ``rocksdict`` separately or along with slipstream (unpinned)::
+
+    pip install slipstream-async[cache]
+
 ::
 
     from slipstream import Cache
