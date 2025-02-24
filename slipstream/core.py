@@ -68,11 +68,12 @@ logger = logging.getLogger(__name__)
 class PausableStream:
     """Can signal source stream to pause.
 
-    If the provided iterable is of AsyncGenerator type, it will receive
-    the signal through the yield send syntax, allowing it to deal with
-    the situation appropriately.
+    If `it` is of type `AsyncGenerator`, it will receive
+    the signal through the yield send syntax in order
+    to handle the state change appropriately.
+    Alternatively, the `signal` property can be used directly.
 
-    For example, the Topic class has a chance to pause the Consumer.
+    For example, the Topic class uses the signal to pause the Consumer.
 
     Any value can be sent as a Signal, but only Signal.PAUSE will trigger
     a pause in consumption of the iterable in PausableStream. Any other
