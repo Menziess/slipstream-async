@@ -115,7 +115,7 @@ class Checkpoint:
 
     Call `heartbeat` with the event time in the dependency stream.
     Call `check_pulse` in the dependent stream with the event time
-    and relevant metadata such as topic offsets.
+    and relevant state such as topic offsets or actual messages.
 
     When the `downtime_check` observes a downtime using the
     `downtime_threshold`, the `downtime_callback` is called
@@ -151,11 +151,11 @@ class Checkpoint:
         self.is_down = False
 
         if cached := self.load():
-            self.metadata = cached['metadata']
-            self.checkpoint_metadata = cached['checkpoint_metadata']
+            self.state = cached['state']
+            self.checkpoint_state = cached['checkpoint_state']
         else:
-            self.metadata = None
-            self.checkpoint_metadata = None
+            self.state = None
+            self.checkpoint_state = None
 
     def __iter__(self):
         """Get relevant values when dict is called."""
@@ -176,14 +176,14 @@ class Checkpoint:
             return self._cache[self._cache_key]
 
     def heartbeat(self, timestamp: datetime):
-        """Update checkpoint to latest metadata.
+        """Update checkpoint to latest state.
 
         Call this function whenever a message is processed in the
         dependency stream. Provide the event timestamp that is
         used to restart the dependent stream when the
         recovered dependency stream has caught up.
         """
-        self.checkpoint_metadata = self.metadata
+        self.checkpoint_state = self.state
         self.checkpoint_timestamp = timestamp
         self.save()
         if self.is_down:
@@ -192,16 +192,16 @@ class Checkpoint:
                     self._recovery_callback()
                 self.is_down = False
 
-    def check_pulse(self, metadata, timestamp: datetime):
-        """Update metadata that can be used as checkpoint.
+    def check_pulse(self, state, timestamp: datetime):
+        """Update state that can be used as checkpoint.
 
         Call this function whenever a message is processed in the
-        dependent stream. Provide relevant metadata that can be
+        dependent stream. Provide relevant state that can be
         used to move back in time to reprocess faulty events
         that were sent out during the downtime.
         """
-        self.metadata = metadata
-        self.metadata_timestamp = timestamp
+        self.state = state
+        self.state_timestamp = timestamp
         self.save()
         if not self.checkpoint_timestamp:
             return
@@ -218,7 +218,7 @@ class Checkpoint:
         This behavior can be overridden by passing a callable to
         `downtime_check` that takes a `Checkpoint` object.
         """
-        diff = c.metadata_timestamp - c.checkpoint_timestamp
+        diff = c.state_timestamp - c.checkpoint_timestamp
         if diff > c._downtime_threshold:
             return diff
         return None
@@ -230,7 +230,7 @@ class Checkpoint:
         This behavior can be overridden by passing a callable to
         `recovery_check` that takes a `Checkpoint` object.
         """
-        return c.checkpoint_timestamp >= c.metadata_timestamp
+        return c.checkpoint_timestamp >= c.state_timestamp
 
     def __repr__(self) -> str:
         """Represent checkpoint."""
