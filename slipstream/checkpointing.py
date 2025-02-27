@@ -167,7 +167,7 @@ class Checkpoint:
             }
         }.items())
 
-    def save_state(self, state: Any, state_timestamp: datetime) -> None:
+    def save_state(self, state: Any, state_timestamp: datetime | Any) -> None:
         """Save state of the stream (to cache)."""
         self.state = state
         self.state_timestamp = state_timestamp
@@ -180,7 +180,7 @@ class Checkpoint:
         self,
         dependency: Dependency,
         checkpoint_state: Any,
-        checkpoint_timestamp: datetime
+        checkpoint_timestamp: datetime | Any
     ) -> None:
         """Save state of the dependency checkpoint (to cache)."""
         dependency.checkpoint_state = checkpoint_state
@@ -233,7 +233,7 @@ class Checkpoint:
                 if self._recovery_callback:
                     self._recovery_callback(self, dependency)
 
-    def check_pulse(self, state, timestamp: datetime) -> Optional[Any]:
+    def check_pulse(self, state, timestamp: datetime | Any) -> Optional[Any]:
         """Update state that can be used as checkpoint.
 
         Call this function whenever a message is processed in the
