@@ -9,7 +9,91 @@ from typing import (
 )
 
 from slipstream.core import Conf, Signal
-from slipstream.interfaces import ICache, Key
+from slipstream.interfaces import ICache
+
+
+class Dependency:
+    """Track the dependent stream state to recover from downtime."""
+
+    def __init__(
+        self,
+        name: str,
+        stream: AsyncIterable[Any],
+        downtime_threshold: Any = timedelta(minutes=10),
+        downtime_check: Optional[Callable[[
+            'Checkpoint', 'Dependency'], Any]] = None,
+        recovery_check: Optional[Callable[[
+            'Checkpoint', 'Dependency'], bool]] = None,
+    ):
+        """Initialize dependency for checkpointing."""
+        self.name = name
+        self.stream = stream
+        self.checkpoint_state = None
+        self.checkpoint_timestamp = None
+        self._downtime_threshold = downtime_threshold
+        self._downtime_check = downtime_check or self._default_downtime_check
+        self._recovery_check = recovery_check or self._default_recovery_check
+
+    def __iter__(self):
+        """Get relevant values when dict is called."""
+        yield from ({
+            'checkpoint_state': self.checkpoint_state,
+            'checkpoint_timestamp': self.checkpoint_timestamp,
+        }.items())
+
+    def save(
+        self,
+        cache: ICache,
+        cache_key_prefix: str,
+        checkpoint_state: Any,
+        checkpoint_timestamp: datetime
+    ):
+        """Save checkpoint state to cache."""
+        key = f'{cache_key_prefix}{self.name}_'
+        cache[key + 'checkpoint_state'] = checkpoint_state
+        cache[key + 'checkpoint_timestamp'] = checkpoint_timestamp
+
+    def load(self, cache: ICache, cache_key_prefix: str) -> None:
+        """Load checkpoint state from cache."""
+        key = f'{cache_key_prefix}{self.name}_'
+        self.checkpoint_state = cache[key + 'checkpoint_state']
+        self.checkpoint_timestamp = cache[key + 'checkpoint_timestamp']
+
+    @staticmethod
+    def _default_downtime_check(
+        c: 'Checkpoint',
+        d: 'Dependency'
+    ) -> Optional[timedelta]:
+        """Determine dependency downtime by comparing event timestamps.
+
+        This behavior can be overridden by passing a callable to
+        `downtime_check` that takes a `Checkpoint` object.
+        """
+        if not (
+            isinstance(c.state_timestamp, datetime)
+            and isinstance(d.checkpoint_timestamp, datetime)
+        ):
+            return None
+
+        diff = c.state_timestamp - d.checkpoint_timestamp
+        if diff > d._downtime_threshold:
+            return diff
+        return None
+
+    @staticmethod
+    def _default_recovery_check(c: 'Checkpoint', d: 'Dependency') -> bool:
+        """Determine dependency has caught up by comparing event timestamps.
+
+        This behavior can be overridden by passing a callable to
+        `recovery_check` that takes a `Checkpoint` object.
+        """
+        if not (
+            isinstance(c.state_timestamp, datetime)
+            and isinstance(d.checkpoint_timestamp, datetime)
+        ):
+            return False
+
+        return d.checkpoint_timestamp >= c.state_timestamp
 
 
 class Checkpoint:
@@ -30,64 +114,81 @@ class Checkpoint:
 
     def __init__(
         self,
+        name: str,
         stream: AsyncIterable[Any],
-        dependencies: list[AsyncIterable[Any]],
+        dependencies: list[Dependency],
+        downtime_callback: Optional[Callable[[
+            'Checkpoint', Dependency], Any]] = None,
+        recovery_callback: Optional[Callable[[
+            'Checkpoint', Dependency], Any]] = None,
         cache: Optional[ICache] = None,
-        cache_key: Key = '_',
-        downtime_threshold: Any = timedelta(minutes=10),
-        downtime_check: Optional[Callable[['Checkpoint'], Any]] = None,
-        recovery_check: Optional[Callable[['Checkpoint'], bool]] = None,
-        downtime_callback: Optional[Callable[['Checkpoint'], Any]] = None,
-        recovery_callback: Optional[Callable[['Checkpoint'], Any]] = None
+        cache_key_prefix: str = '_',
     ):
         """Create instance that tracks downtime of dependency streams.
 
         If `cache` and `cache_key` are set, the checkpoint information
         is saved and loaded in the cache under `cache_key`.
         """
+        self.name = name
         self.stream = stream
-        self.dependencies = dependencies
+        self.dependencies: dict[str, Dependency] = {
+            dependency.name: dependency
+            for dependency in dependencies
+        }
         self._cache = cache
-        self._cache_key = cache_key
-        self._downtime_threshold = downtime_threshold
-        self._downtime_check = downtime_check or self._default_downtime_check
-        self._recovery_check = recovery_check or self._default_recovery_check
+        self._cache_key = f'{cache_key_prefix}_{name}_'
         self._downtime_callback = downtime_callback
         self._recovery_callback = recovery_callback
         self.is_down = False
 
-        if cached := self.load():
-            self.state = cached['state']
-            self.state_timestamp = cached['state_timestamp']
-            self.checkpoint_state = cached['checkpoint_state']
-            self.checkpoint_timestamp = cached['checkpoint_timestamp']
-        else:
-            self.state = None
-            self.state_timestamp = None
-            self.checkpoint_state = None
-            self.checkpoint_timestamp = None
+        self.state = None
+        self.state_timestamp = None
+
+        # Load checkpoint state from cache
+        if self._cache:
+            self.state = self._cache[
+                f'{self._cache_key}_state']
+            self.state_timestamp = self._cache[
+                f'{self._cache_key}_state_timestamp']
+            for dependency in self.dependencies.values():
+                dependency.load(self._cache, self._cache_key)
 
     def __iter__(self):
         """Get relevant values when dict is called."""
         yield from ({
             'state': self.state,
             'state_timestamp': self.state_timestamp,
-            'checkpoint_state': self.checkpoint_state,
-            'checkpoint_timestamp': self.checkpoint_timestamp,
+            'checkpoints': {
+                dependency.name: dict(dependency)
+                for dependency in self.dependencies.values()
+            }
         }.items())
 
-    def save(self):
-        """Save dict representation in cache if cache is provided."""
+    def save_state(self, state: Any, state_timestamp: datetime) -> None:
+        """Save state of the stream (to cache)."""
+        self.state = state
+        self.state_timestamp = state_timestamp
         if not self._cache:
             return
-        self._cache[self._cache_key] = dict(self)
+        self._cache[f'{self._cache_key}_state'] = state
+        self._cache[f'{self._cache_key}_state_timestamp'] = state_timestamp
 
-    def load(self):
-        """Load dict representation from cache if cache is provided."""
-        if self._cache:
-            return self._cache[self._cache_key]
+    def save_checkpoint(
+        self,
+        dependency: Dependency,
+        checkpoint_state: Any,
+        checkpoint_timestamp: datetime
+    ) -> None:
+        """Save state of the dependency checkpoint (to cache)."""
+        dependency.checkpoint_state = checkpoint_state
+        dependency.checkpoint_timestamp = checkpoint_timestamp
+        if not self._cache:
+            return
+        dependency.save(
+            self._cache, self._cache_key,
+            checkpoint_state, checkpoint_timestamp)
 
-    def heartbeat(self, timestamp: datetime):
+    def heartbeat(self, dependency_name: str, timestamp: datetime):
         """Update checkpoint to latest state.
 
         Call this function whenever a message is processed in the
@@ -95,15 +196,15 @@ class Checkpoint:
         used to restart the dependent stream when the
         recovered dependency stream has caught up.
         """
-        self.checkpoint_state = self.state
-        self.checkpoint_timestamp = timestamp
-        self.save()
+        if not (dependency := self.dependencies.get(dependency_name)):
+            raise KeyError('Dependency does not exist.')
+        self.save_checkpoint(dependency, self.state, timestamp)
         if self.is_down:
-            if self._recovery_check(self):
+            if dependency._recovery_check(self, dependency):
                 key = str(id(self.stream))
                 Conf().iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
-                    self._recovery_callback(self)
+                    self._recovery_callback(self, dependency)
                 self.is_down = False
 
     def check_pulse(self, state, timestamp: datetime):
@@ -114,56 +215,24 @@ class Checkpoint:
         used to move back in time to reprocess faulty events
         that were sent out during the downtime.
         """
-        if not self.checkpoint_timestamp:
+        self.save_state(state, timestamp)
+
+        for dependency in self.dependencies.values():
+
             # When the dependency stream hasn't had any message yet
             # set the checkpoint to the very first available state
-            self.checkpoint_state = state
-            self.checkpoint_timestamp = timestamp
+            if not dependency.checkpoint_timestamp:
+                self.save_checkpoint(dependency, state, timestamp)
 
-        self.state = state
-        self.state_timestamp = timestamp
-        self.save()
-
-        if downtime := self._downtime_check(self):
-            key = str(id(self.stream))
-            Conf().iterables[key].send_signal(Signal.PAUSE)
-            if self._downtime_callback:
-                self._downtime_callback(self)
-            self.is_down = True
-            return downtime
-
-    @staticmethod
-    def _default_downtime_check(c: 'Checkpoint') -> Optional[timedelta]:
-        """Determine dependency downtime by comparing event timestamps.
-
-        This behavior can be overridden by passing a callable to
-        `downtime_check` that takes a `Checkpoint` object.
-        """
-        if not (
-            isinstance(c.state_timestamp, datetime)
-            and isinstance(c.checkpoint_timestamp, datetime)
-        ):
-            return None
-
-        diff = c.state_timestamp - c.checkpoint_timestamp
-        if diff > c._downtime_threshold:
-            return diff
-        return None
-
-    @staticmethod
-    def _default_recovery_check(c: 'Checkpoint') -> bool:
-        """Determine dependency has caught up by comparing event timestamps.
-
-        This behavior can be overridden by passing a callable to
-        `recovery_check` that takes a `Checkpoint` object.
-        """
-        if not (
-            isinstance(c.state_timestamp, datetime)
-            and isinstance(c.checkpoint_timestamp, datetime)
-        ):
-            return False
-
-        return c.checkpoint_timestamp >= c.state_timestamp
+            # Trigger on the first dependency that is down and
+            # pause the dependent stream
+            if downtime := dependency._downtime_check(self, dependency):
+                key = str(id(self.stream))
+                Conf().iterables[key].send_signal(Signal.PAUSE)
+                if self._downtime_callback:
+                    self._downtime_callback(self, dependency)
+                self.is_down = True
+                return downtime
 
     def __repr__(self) -> str:
         """Represent checkpoint."""
