@@ -152,10 +152,14 @@ class Checkpoint:
 
         if cached := self.load():
             self.state = cached['state']
+            self.state_timestamp = cached['state_timestamp']
             self.checkpoint_state = cached['checkpoint_state']
+            self.checkpoint_timestamp = cached['checkpoint_timestamp']
         else:
             self.state = None
+            self.state_timestamp = None
             self.checkpoint_state = None
+            self.checkpoint_timestamp = None
 
     def __iter__(self):
         """Get relevant values when dict is called."""
@@ -200,11 +204,16 @@ class Checkpoint:
         used to move back in time to reprocess faulty events
         that were sent out during the downtime.
         """
+        if not self.checkpoint_timestamp:
+            # When the dependency stream hasn't had any message yet
+            # set the checkpoint to the very first available state
+            self.checkpoint_state = state
+            self.checkpoint_timestamp = timestamp
+
         self.state = state
         self.state_timestamp = timestamp
         self.save()
-        if not self.checkpoint_timestamp:
-            return
+
         if downtime := self._downtime_check(self):
             if self._downtime_callback:
                 self._downtime_callback()
@@ -218,6 +227,12 @@ class Checkpoint:
         This behavior can be overridden by passing a callable to
         `downtime_check` that takes a `Checkpoint` object.
         """
+        if not (
+            isinstance(c.state_timestamp, datetime)
+            and isinstance(c.checkpoint_timestamp, datetime)
+        ):
+            return None
+
         diff = c.state_timestamp - c.checkpoint_timestamp
         if diff > c._downtime_threshold:
             return diff
@@ -230,6 +245,12 @@ class Checkpoint:
         This behavior can be overridden by passing a callable to
         `recovery_check` that takes a `Checkpoint` object.
         """
+        if not (
+            isinstance(c.state_timestamp, datetime)
+            and isinstance(c.checkpoint_timestamp, datetime)
+        ):
+            return None
+
         return c.checkpoint_timestamp >= c.state_timestamp
 
     def __repr__(self) -> str:
