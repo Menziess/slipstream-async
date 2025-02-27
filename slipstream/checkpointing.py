@@ -35,10 +35,10 @@ class Checkpoint:
         cache: Optional[ICache] = None,
         cache_key: Key = '_',
         downtime_threshold: Any = timedelta(minutes=10),
-        downtime_check: Optional[Callable] = None,
-        recovery_check: Optional[Callable] = None,
-        downtime_callback: Optional[Callable] = None,
-        recovery_callback: Optional[Callable] = None
+        downtime_check: Optional[Callable[['Checkpoint'], Any]] = None,
+        recovery_check: Optional[Callable[['Checkpoint'], bool]] = None,
+        downtime_callback: Optional[Callable[['Checkpoint'], Any]] = None,
+        recovery_callback: Optional[Callable[['Checkpoint'], Any]] = None
     ):
         """Create instance that tracks downtime of dependency streams.
 
@@ -103,7 +103,7 @@ class Checkpoint:
                 key = str(id(self.stream))
                 Conf().iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
-                    self._recovery_callback()
+                    self._recovery_callback(self)
                 self.is_down = False
 
     def check_pulse(self, state, timestamp: datetime):
@@ -128,12 +128,12 @@ class Checkpoint:
             key = str(id(self.stream))
             Conf().iterables[key].send_signal(Signal.PAUSE)
             if self._downtime_callback:
-                self._downtime_callback()
+                self._downtime_callback(self)
             self.is_down = True
             return downtime
 
     @staticmethod
-    def _default_downtime_check(c: 'Checkpoint'):
+    def _default_downtime_check(c: 'Checkpoint') -> Optional[timedelta]:
         """Determine dependency downtime by comparing event timestamps.
 
         This behavior can be overridden by passing a callable to
@@ -151,7 +151,7 @@ class Checkpoint:
         return None
 
     @staticmethod
-    def _default_recovery_check(c: 'Checkpoint'):
+    def _default_recovery_check(c: 'Checkpoint') -> bool:
         """Determine dependency has caught up by comparing event timestamps.
 
         This behavior can be overridden by passing a callable to
@@ -161,7 +161,7 @@ class Checkpoint:
             isinstance(c.state_timestamp, datetime)
             and isinstance(c.checkpoint_timestamp, datetime)
         ):
-            return None
+            return False
 
         return c.checkpoint_timestamp >= c.state_timestamp
 
