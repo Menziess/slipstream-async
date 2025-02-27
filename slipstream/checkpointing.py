@@ -1,5 +1,6 @@
 """Slipstream checkpointing."""
 
+import logging
 from datetime import datetime, timedelta
 from typing import (
     Any,
@@ -10,6 +11,8 @@ from typing import (
 
 from slipstream.core import Conf, Signal
 from slipstream.interfaces import ICache
+
+logger = logging.getLogger(__name__)
 
 
 class Dependency:
@@ -206,6 +209,10 @@ class Checkpoint:
                 return
 
             if not any(_.is_down for _ in self.dependencies.values()):
+                logger.debug(
+                    f'Downtime restored of dependency "{dependency.name}", '
+                    f'resuming stream "{self.name}".'
+                )
                 key = str(id(self.stream))
                 Conf().iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
@@ -233,6 +240,10 @@ class Checkpoint:
             # Trigger on the first dependency that is down and
             # pause the dependent stream
             if downtime := dependency._downtime_check(self, dependency):
+                logger.debug(
+                    f'Downtime detected of dependency "{dependency.name}", '
+                    f'pausing stream "{self.name}".'
+                )
                 key = str(id(self.stream))
                 Conf().iterables[key].send_signal(Signal.PAUSE)
                 if self._downtime_callback:
