@@ -33,6 +33,7 @@ class Dependency:
         self._downtime_threshold = downtime_threshold
         self._downtime_check = downtime_check or self._default_downtime_check
         self._recovery_check = recovery_check or self._default_recovery_check
+        self.is_down = False
 
     def __iter__(self):
         """Get relevant values when dict is called."""
@@ -139,7 +140,6 @@ class Checkpoint:
         self._cache_key = f'{cache_key_prefix}_{name}_'
         self._downtime_callback = downtime_callback
         self._recovery_callback = recovery_callback
-        self.is_down = False
 
         self.state = None
         self.state_timestamp = None
@@ -188,7 +188,7 @@ class Checkpoint:
             self._cache, self._cache_key,
             checkpoint_state, checkpoint_timestamp)
 
-    def heartbeat(self, dependency_name: str, timestamp: datetime):
+    def heartbeat(self, dependency_name: str, timestamp: datetime) -> None:
         """Update checkpoint to latest state.
 
         Call this function whenever a message is processed in the
@@ -199,15 +199,19 @@ class Checkpoint:
         if not (dependency := self.dependencies.get(dependency_name)):
             raise KeyError('Dependency does not exist.')
         self.save_checkpoint(dependency, self.state, timestamp)
-        if self.is_down:
+        if dependency.is_down:
             if dependency._recovery_check(self, dependency):
+                dependency.is_down = False
+            else:
+                return
+
+            if not any(_.is_down for _ in self.dependencies.values()):
                 key = str(id(self.stream))
                 Conf().iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
                     self._recovery_callback(self, dependency)
-                self.is_down = False
 
-    def check_pulse(self, state, timestamp: datetime):
+    def check_pulse(self, state, timestamp: datetime) -> Optional[Any]:
         """Update state that can be used as checkpoint.
 
         Call this function whenever a message is processed in the
@@ -216,6 +220,8 @@ class Checkpoint:
         that were sent out during the downtime.
         """
         self.save_state(state, timestamp)
+
+        downtime = None
 
         for dependency in self.dependencies.values():
 
@@ -231,8 +237,10 @@ class Checkpoint:
                 Conf().iterables[key].send_signal(Signal.PAUSE)
                 if self._downtime_callback:
                     self._downtime_callback(self, dependency)
-                self.is_down = True
-                return downtime
+                dependency.is_down = True
+
+        if any(_.is_down for _ in self.dependencies.values()):
+            return downtime
 
     def __repr__(self) -> str:
         """Represent checkpoint."""
