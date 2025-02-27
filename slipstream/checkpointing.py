@@ -191,7 +191,11 @@ class Checkpoint:
             self._cache, self._cache_key,
             checkpoint_state, checkpoint_timestamp)
 
-    def heartbeat(self, dependency_name: str, timestamp: datetime) -> None:
+    def heartbeat(
+        self,
+        timestamp: datetime | Any,
+        dependency_name: Optional[str] = None,
+    ) -> None:
         """Update checkpoint to latest state.
 
         Call this function whenever a message is processed in the
@@ -199,9 +203,20 @@ class Checkpoint:
         used to restart the dependent stream when the
         recovered dependency stream has caught up.
         """
-        if not (dependency := self.dependencies.get(dependency_name)):
+        if dependency_name and not (
+            dependency := self.dependencies.get(dependency_name)
+        ):
             raise KeyError('Dependency does not exist.')
+        elif len(self.dependencies) == 1:
+            dependency = next(iter(self.dependencies.values()))
+        else:
+            raise ValueError(
+                'Argument `dependency_name` must be provided '
+                'for checkpoint with multiple dependencies.'
+            )
+
         self.save_checkpoint(dependency, self.state, timestamp)
+
         if dependency.is_down:
             if dependency._recovery_check(self, dependency):
                 dependency.is_down = False
