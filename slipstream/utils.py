@@ -117,7 +117,7 @@ class Checkpoint:
     Call `check_pulse` in the dependent stream with the event time
     and relevant metadata such as topic offsets.
 
-    When the timestamp difference between streams surpasses the
+    When the `downtime_check` observes a downtime using the
     `downtime_threshold`, the `downtime_callback` is called
     and `is_down` is set to `True`.
 
@@ -130,7 +130,9 @@ class Checkpoint:
         self,
         cache: Optional[ICache] = None,
         cache_key: Key = '_',
-        downtime_threshold=timedelta(seconds=3),
+        downtime_threshold: Any = timedelta(minutes=10),
+        downtime_check: Optional[Callable] = None,
+        recovery_check: Optional[Callable] = None,
         downtime_callback: Optional[Callable] = None,
         recovery_callback: Optional[Callable] = None
     ):
@@ -142,6 +144,8 @@ class Checkpoint:
         self._cache = cache
         self._cache_key = cache_key
         self._downtime_threshold = downtime_threshold
+        self._downtime_check = downtime_check or self._default_downtime_check
+        self._recovery_check = recovery_check or self._default_recovery_check
         self._downtime_callback = downtime_callback
         self._recovery_callback = recovery_callback
         self.is_down = False
@@ -183,7 +187,7 @@ class Checkpoint:
         self.checkpoint_timestamp = timestamp
         self.save()
         if self.is_down:
-            if self.checkpoint_timestamp >= self.metadata_timestamp:
+            if self._recovery_check(self):
                 if self._recovery_callback:
                     self._recovery_callback()
                 self.is_down = False
@@ -201,12 +205,32 @@ class Checkpoint:
         self.save()
         if not self.checkpoint_timestamp:
             return
-        diff = self.metadata_timestamp - self.checkpoint_timestamp
-        if diff > self._downtime_threshold:
+        if downtime := self._downtime_check(self):
             if self._downtime_callback:
                 self._downtime_callback()
             self.is_down = True
+            return downtime
+
+    @staticmethod
+    def _default_downtime_check(c: 'Checkpoint'):
+        """Determine dependency downtime by comparing event timestamps.
+
+        This behavior can be overridden by passing a callable to
+        `downtime_check` that takes a `Checkpoint` object.
+        """
+        diff = c.metadata_timestamp - c.checkpoint_timestamp
+        if diff > c._downtime_threshold:
             return diff
+        return None
+
+    @staticmethod
+    def _default_recovery_check(c: 'Checkpoint'):
+        """Determine dependency has caught up by comparing event timestamps.
+
+        This behavior can be overridden by passing a callable to
+        `recovery_check` that takes a `Checkpoint` object.
+        """
+        return c.checkpoint_timestamp >= c.metadata_timestamp
 
     def __repr__(self) -> str:
         """Represent checkpoint."""
