@@ -86,6 +86,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules"
+doctest_optionflags = "ELLIPSIS"
 testpaths = [
   "slipstream",
   "tests",

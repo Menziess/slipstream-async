@@ -16,12 +16,19 @@ logger = logging.getLogger(__name__)
 
 
 class Dependency:
-    """Track the dependent stream state to recover from downtime."""
+    """Track the dependent stream state to recover from downtime.
+
+    >>> async def emoji():
+    ...     for emoji in '🏆📞🐟👌':
+    ...         yield emoji
+    >>> Dependency('emoji', emoji())
+    {'checkpoint_state': None, 'checkpoint_timestamp': None}
+    """
 
     def __init__(
         self,
         name: str,
-        stream: AsyncIterable[Any],
+        dependency: AsyncIterable[Any],
         downtime_threshold: Any = timedelta(minutes=10),
         downtime_check: Optional[Callable[[
             'Checkpoint', 'Dependency'], Any]] = None,
@@ -30,7 +37,7 @@ class Dependency:
     ):
         """Initialize dependency for checkpointing."""
         self.name = name
-        self.stream = stream
+        self.dependency = dependency
         self.checkpoint_state = None
         self.checkpoint_timestamp = None
         self._downtime_threshold = downtime_threshold
@@ -99,27 +106,69 @@ class Dependency:
             'checkpoint_timestamp': self.checkpoint_timestamp,
         }.items())
 
+    def __repr__(self) -> str:
+        """Represent checkpoint."""
+        return str(dict(self))
+
 
 class Checkpoint:
     """Pulse the heartbeat of dependency stream to handle downtimes.
 
-    Call `heartbeat` with the event time in the dependency stream.
-    Call `check_pulse` in the dependent stream with the event time
-    and relevant state such as topic offsets or actual messages.
+    A checkpoint consists of a dependent stream and dependencies streams.
 
-    When the `downtime_check` observes a downtime using the
-    `downtime_threshold`, the `downtime_callback` is called
-    and `is_down` is set to `True`.
+    >>> async def emoji():
+    ...     for emoji in '🏆📞🐟👌':
+    ...         yield emoji
 
-    When a message is received in the dependency stream, the
-    `recovery_callback` is called and `is_down` is set to
-    `False` again.
+    >>> dependent, dependency = emoji(), emoji()
+
+    >>> c = Checkpoint(
+    ...     'dependent', dependent=dependent,
+    ...     dependencies=[Dependency('dependency', dependency)]
+    ... )
+
+    Checkpoints automatically handle pausing of dependent streams
+    if they are bound to user handler functions using handle:
+
+    >>> from slipstream import handle
+
+    >>> @handle(dependent)
+    ... def handler(msg):
+    ...     yield msg
+
+    On the first pulse check, no message might have been received
+    from `dependency` yet. Therefore the dependency checkpoint is
+    updated with the initial state and timestamp of the
+    dependent stream:
+
+    >>> c.check_pulse(state=0, timestamp=datetime(2025, 1, 1, 10))
+    >>> c['dependency'].checkpoint_timestamp
+    datetime.datetime(2025, 1, 1, 10, 0)
+
+    When a message is received in `dependency`, send a heartbeat
+    with its event time, which can be compared with the
+    dependent event times to check for downtime:
+
+    >>> c.heartbeat(datetime(2025, 1, 1, 10, 30))
+
+    When the pulse is checked after a while, it's apparent that no
+    dependency messages have been received for 30 minutes:
+
+    >>> c.check_pulse(state=100, timestamp=datetime(2025, 1, 1, 11))
+    datetime.timedelta(seconds=1800)
+
+    The dependent stream will be paused and resumed on downtime and
+    recovery checks. Callbacks can be provided for additional
+    custom behavior.
+
+    If no cache is provided, the checkpoint lifespan will be limited
+    to that of the application runtime.
     """
 
     def __init__(
         self,
         name: str,
-        stream: AsyncIterable[Any],
+        dependent: AsyncIterable[Any],
         dependencies: list[Dependency],
         downtime_callback: Optional[Callable[[
             'Checkpoint', Dependency], Any]] = None,
@@ -130,7 +179,7 @@ class Checkpoint:
     ):
         """Create instance that tracks downtime of dependency streams."""
         self.name = name
-        self.stream = stream
+        self.dependent = dependent
         self.dependencies: dict[str, Dependency] = {
             dependency.name: dependency
             for dependency in dependencies
@@ -188,8 +237,9 @@ class Checkpoint:
             if not any(_.is_down for _ in self.dependencies.values()):
                 logger.debug(
                     f'Dependency "{dependency.name}" downtime resolved')
-                key = str(id(self.stream))
-                Conf().iterables[key].send_signal(Signal.RESUME)
+                key, c = str(id(self.dependent)), Conf()
+                if key in c.iterables:
+                    c.iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
                     self._recovery_callback(self, dependency)
 
@@ -223,8 +273,9 @@ class Checkpoint:
             if downtime := dependency._downtime_check(self, dependency):
                 logger.debug(
                     f'Downtime of dependency "{dependency.name}" detected')
-                key = str(id(self.stream))
-                Conf().iterables[key].send_signal(Signal.PAUSE)
+                key, c = str(id(self.dependent)), Conf()
+                if key in c.iterables:
+                    c.iterables[key].send_signal(Signal.PAUSE)
                 if self._downtime_callback:
                     self._downtime_callback(self, dependency)
                 dependency.is_down = True
@@ -255,6 +306,10 @@ class Checkpoint:
         dependency.save(
             self._cache, self._cache_key,
             checkpoint_state, checkpoint_timestamp)
+
+    def __getitem__(self, key: str) -> Dependency:
+        """Get dependency from dependencies."""
+        return self.dependencies[key]
 
     def __iter__(self):
         """Get relevant values when dict is called."""
