@@ -345,7 +345,7 @@ class Topic:
         ] if headers else None
         if self.dry:
             logger.warning(
-                f'Skipped sending message to {self.name} [dry=True].'
+                f'Skipped sending message to {self.name} [dry=True]'
             )
             return
         if not self.producer:
@@ -380,6 +380,7 @@ class Topic:
                 async for msg in consumer:
                     if signal is Signal.PAUSE:
                         consumer.pause(*consumer.assignment())
+                        logger.debug(f'{self.name} paused')
                         while True:
                             signal = yield Signal.SENTINEL
                             if signal is Signal.RESUME:

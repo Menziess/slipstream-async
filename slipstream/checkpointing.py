@@ -38,13 +38,6 @@ class Dependency:
         self._recovery_check = recovery_check or self._default_recovery_check
         self.is_down = False
 
-    def __iter__(self):
-        """Get relevant values when dict is called."""
-        yield from ({
-            'checkpoint_state': self.checkpoint_state,
-            'checkpoint_timestamp': self.checkpoint_timestamp,
-        }.items())
-
     def save(
         self,
         cache: ICache,
@@ -99,6 +92,13 @@ class Dependency:
 
         return d.checkpoint_timestamp >= c.state_timestamp
 
+    def __iter__(self):
+        """Get relevant values when dict is called."""
+        yield from ({
+            'checkpoint_state': self.checkpoint_state,
+            'checkpoint_timestamp': self.checkpoint_timestamp,
+        }.items())
+
 
 class Checkpoint:
     """Pulse the heartbeat of dependency stream to handle downtimes.
@@ -128,11 +128,7 @@ class Checkpoint:
         cache: Optional[ICache] = None,
         cache_key_prefix: str = '_',
     ):
-        """Create instance that tracks downtime of dependency streams.
-
-        If `cache` and `cache_key` are set, the checkpoint information
-        is saved and loaded in the cache under `cache_key`.
-        """
+        """Create instance that tracks downtime of dependency streams."""
         self.name = name
         self.stream = stream
         self.dependencies: dict[str, Dependency] = {
@@ -156,18 +152,87 @@ class Checkpoint:
             for dependency in self.dependencies.values():
                 dependency.load(self._cache, self._cache_key)
 
-    def __iter__(self):
-        """Get relevant values when dict is called."""
-        yield from ({
-            'state': self.state,
-            'state_timestamp': self.state_timestamp,
-            'checkpoints': {
-                dependency.name: dict(dependency)
-                for dependency in self.dependencies.values()
-            }
-        }.items())
+    def heartbeat(
+        self,
+        timestamp: datetime | Any,
+        dependency_name: Optional[str] = None,
+    ) -> None:
+        """Update checkpoint to latest state.
 
-    def save_state(self, state: Any, state_timestamp: datetime | Any) -> None:
+        Args:
+            timestamp (datetime | Any): Typically the event timestamp that is
+                compared to the event timestamp of a dependent stream.
+            dependency_name (str, optional): Required when there are multiple
+                dependencies to specify which one the heartbeat is for.
+        """
+        if dependency_name and not (
+            dependency := self.dependencies.get(dependency_name)
+        ):
+            raise KeyError('Dependency does not exist.')
+        elif len(self.dependencies) == 1:
+            dependency = next(iter(self.dependencies.values()))
+        else:
+            raise ValueError(
+                'Argument `dependency_name` must be provided '
+                'for checkpoint with multiple dependencies.'
+            )
+
+        self._save_checkpoint(dependency, self.state, timestamp)
+
+        if dependency.is_down:
+            if dependency._recovery_check(self, dependency):
+                dependency.is_down = False
+            else:
+                return
+
+            if not any(_.is_down for _ in self.dependencies.values()):
+                logger.debug(
+                    f'Dependency "{dependency.name}" downtime resolved')
+                key = str(id(self.stream))
+                Conf().iterables[key].send_signal(Signal.RESUME)
+                if self._recovery_callback:
+                    self._recovery_callback(self, dependency)
+
+    def check_pulse(self, state, timestamp: datetime | Any) -> Optional[Any]:
+        """Update state that can be used as checkpoint.
+
+        Args:
+            state (Any): Any information that can be used for reprocessing any
+                incorrect data that was sent out during downtime of a
+                dependency stream (offsets for example).
+            timestamp (datetime | Any): Typically the event timestamp that is
+                compared to the event timestamp of a dependency stream.
+
+        Returns:
+            Any: Typically the timedelta between the last state_timestamp and
+                the checkpoint_timestamp since the stream went down.
+        """
+        self._save_state(state, timestamp)
+
+        downtime = None
+
+        for dependency in self.dependencies.values():
+
+            # When the dependency stream hasn't had any message yet
+            # set the checkpoint to the very first available state
+            if not dependency.checkpoint_timestamp:
+                self._save_checkpoint(dependency, state, timestamp)
+
+            # Trigger on the first dependency that is down and
+            # pause the dependent stream
+            if downtime := dependency._downtime_check(self, dependency):
+                logger.debug(
+                    f'Downtime of dependency "{dependency.name}" detected')
+                key = str(id(self.stream))
+                Conf().iterables[key].send_signal(Signal.PAUSE)
+                if self._downtime_callback:
+                    self._downtime_callback(self, dependency)
+                dependency.is_down = True
+
+        if any(_.is_down for _ in self.dependencies.values()):
+            return downtime
+
+    def _save_state(self, state: Any, state_timestamp: datetime | Any) -> None:
         """Save state of the stream (to cache)."""
         self.state = state
         self.state_timestamp = state_timestamp
@@ -176,7 +241,7 @@ class Checkpoint:
         self._cache[f'{self._cache_key}_state'] = state
         self._cache[f'{self._cache_key}_state_timestamp'] = state_timestamp
 
-    def save_checkpoint(
+    def _save_checkpoint(
         self,
         dependency: Dependency,
         checkpoint_state: Any,
@@ -191,82 +256,16 @@ class Checkpoint:
             self._cache, self._cache_key,
             checkpoint_state, checkpoint_timestamp)
 
-    def heartbeat(
-        self,
-        timestamp: datetime | Any,
-        dependency_name: Optional[str] = None,
-    ) -> None:
-        """Update checkpoint to latest state.
-
-        Call this function whenever a message is processed in the
-        dependency stream. Provide the event timestamp that is
-        used to restart the dependent stream when the
-        recovered dependency stream has caught up.
-        """
-        if dependency_name and not (
-            dependency := self.dependencies.get(dependency_name)
-        ):
-            raise KeyError('Dependency does not exist.')
-        elif len(self.dependencies) == 1:
-            dependency = next(iter(self.dependencies.values()))
-        else:
-            raise ValueError(
-                'Argument `dependency_name` must be provided '
-                'for checkpoint with multiple dependencies.'
-            )
-
-        self.save_checkpoint(dependency, self.state, timestamp)
-
-        if dependency.is_down:
-            if dependency._recovery_check(self, dependency):
-                dependency.is_down = False
-            else:
-                return
-
-            if not any(_.is_down for _ in self.dependencies.values()):
-                logger.debug(
-                    f'Downtime restored of dependency "{dependency.name}", '
-                    f'resuming stream "{self.name}".'
-                )
-                key = str(id(self.stream))
-                Conf().iterables[key].send_signal(Signal.RESUME)
-                if self._recovery_callback:
-                    self._recovery_callback(self, dependency)
-
-    def check_pulse(self, state, timestamp: datetime | Any) -> Optional[Any]:
-        """Update state that can be used as checkpoint.
-
-        Call this function whenever a message is processed in the
-        dependent stream. Provide relevant state that can be
-        used to move back in time to reprocess faulty events
-        that were sent out during the downtime.
-        """
-        self.save_state(state, timestamp)
-
-        downtime = None
-
-        for dependency in self.dependencies.values():
-
-            # When the dependency stream hasn't had any message yet
-            # set the checkpoint to the very first available state
-            if not dependency.checkpoint_timestamp:
-                self.save_checkpoint(dependency, state, timestamp)
-
-            # Trigger on the first dependency that is down and
-            # pause the dependent stream
-            if downtime := dependency._downtime_check(self, dependency):
-                logger.debug(
-                    f'Downtime detected of dependency "{dependency.name}", '
-                    f'pausing stream "{self.name}".'
-                )
-                key = str(id(self.stream))
-                Conf().iterables[key].send_signal(Signal.PAUSE)
-                if self._downtime_callback:
-                    self._downtime_callback(self, dependency)
-                dependency.is_down = True
-
-        if any(_.is_down for _ in self.dependencies.values()):
-            return downtime
+    def __iter__(self):
+        """Get relevant values when dict is called."""
+        yield from ({
+            'state': self.state,
+            'state_timestamp': self.state_timestamp,
+            'checkpoints': {
+                dependency.name: dict(dependency)
+                for dependency in self.dependencies.values()
+            }
+        }.items())
 
     def __repr__(self) -> str:
         """Represent checkpoint."""
