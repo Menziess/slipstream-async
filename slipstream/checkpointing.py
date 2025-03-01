@@ -11,6 +11,7 @@ from typing import (
 
 from slipstream.core import Conf, Signal
 from slipstream.interfaces import ICache
+from slipstream.utils import iscoroutinecallable
 
 logger = logging.getLogger(__name__)
 
@@ -133,15 +134,25 @@ class Checkpoint:
     >>> from slipstream import handle
 
     >>> @handle(dependent)
-    ... def handler(msg):
-    ...     yield msg
+    ... async def dependent_handler(msg):
+    ...     key, val, offset = msg.key, msg.value, msg.offset
+    ...     c.check_pulse(state=offset, timestamp=msg['event_timestamp'])
+    ...     yield key, msg
+
+    >>> @handle(dependency)
+    ... async def dependency_handler(msg):
+    ...     key, val = msg.key, msg.value
+    ...     await c.heartbeat(val['event_timestamp'])
+    ...     yield key, val
 
     On the first pulse check, no message might have been received
     from `dependency` yet. Therefore the dependency checkpoint is
     updated with the initial state and timestamp of the
     dependent stream:
 
-    >>> c.check_pulse(state=0, timestamp=datetime(2025, 1, 1, 10))
+    >>> from asyncio import run  # use await in
+
+    >>> run(c.check_pulse(state=0, timestamp=datetime(2025, 1, 1, 10)))
     >>> c['dependency'].checkpoint_timestamp
     datetime.datetime(2025, 1, 1, 10, 0)
 
@@ -149,12 +160,12 @@ class Checkpoint:
     with its event time, which can be compared with the
     dependent event times to check for downtime:
 
-    >>> c.heartbeat(datetime(2025, 1, 1, 10, 30))
+    >>> run(c.heartbeat(datetime(2025, 1, 1, 10, 30)))
 
     When the pulse is checked after a while, it's apparent that no
     dependency messages have been received for 30 minutes:
 
-    >>> c.check_pulse(state=100, timestamp=datetime(2025, 1, 1, 11))
+    >>> run(c.check_pulse(state=100, timestamp=datetime(2025, 1, 1, 11)))
     datetime.timedelta(seconds=1800)
 
     Because the downtime surpasses the default `downtime_threshold`,
@@ -202,7 +213,7 @@ class Checkpoint:
             for dependency in self.dependencies.values():
                 dependency.load(self._cache, self._cache_key)
 
-    def heartbeat(
+    async def heartbeat(
         self,
         timestamp: datetime | Any,
         dependency_name: Optional[str] = None,
@@ -242,9 +253,16 @@ class Checkpoint:
                 if key in c.iterables:
                     c.iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
-                    self._recovery_callback(self, dependency)
+                    if iscoroutinecallable(self._downtime_callback):
+                        await self._recovery_callback(self, dependency)
+                    else:
+                        self._recovery_callback(self, dependency)
 
-    def check_pulse(self, state, timestamp: datetime | Any) -> Optional[Any]:
+    async def check_pulse(
+        self,
+        state,
+        timestamp: datetime | Any
+    ) -> Optional[Any]:
         """Update state that can be used as checkpoint.
 
         Args:
@@ -278,7 +296,10 @@ class Checkpoint:
                 if key in c.iterables:
                     c.iterables[key].send_signal(Signal.PAUSE)
                 if self._downtime_callback:
-                    self._downtime_callback(self, dependency)
+                    if iscoroutinecallable(self._downtime_callback):
+                        await self._downtime_callback(self, dependency)
+                    else:
+                        self._downtime_callback(self, dependency)
                 dependency.is_down = True
 
         if any(_.is_down for _ in self.dependencies.values()):

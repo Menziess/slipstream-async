@@ -280,11 +280,20 @@ class Topic:
             if k in params
         })
 
-    async def seek(self, offset: int, consumer: Optional[AIOKafkaConsumer]):
+    async def seek(
+        self,
+        offset: int,
+        consumer: Optional[AIOKafkaConsumer] = None
+    ):
         """Seek to offset."""
-        if not (c := consumer or self.consumer):
+        c = consumer or self.consumer
+        if not c:
             raise RuntimeError('No consumer provided.')
+
         partitions = c.assignment()
+        if not partitions:
+            raise RuntimeError('No partitions assigned to consumer.')
+
         if offset < READ_FROM_START:
             raise ValueError(f'Offset must be bigger than: {READ_FROM_START}.')
         if offset == READ_FROM_START:
