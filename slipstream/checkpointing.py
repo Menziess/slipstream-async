@@ -114,7 +114,7 @@ class Dependency:
 class Checkpoint:
     """Pulse the heartbeat of dependency stream to handle downtimes.
 
-    A checkpoint consists of a dependent stream and dependencies streams.
+    A checkpoint consists of a dependent stream and dependency streams.
 
     >>> async def emoji():
     ...     for emoji in '🏆📞🐟👌':
@@ -157,9 +157,10 @@ class Checkpoint:
     >>> c.check_pulse(state=100, timestamp=datetime(2025, 1, 1, 11))
     datetime.timedelta(seconds=1800)
 
-    The dependent stream will be paused and resumed on downtime and
-    recovery checks. Callbacks can be provided for additional
-    custom behavior.
+    Because the downtime surpasses the default `downtime_threshold`,
+    the dependent stream will be paused (and resumed when the
+    recovery check succeeds). Callbacks can be provided for
+    additional custom behavior.
 
     If no cache is provided, the checkpoint lifespan will be limited
     to that of the application runtime.
