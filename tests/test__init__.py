@@ -3,6 +3,7 @@ from asyncio import sleep
 import pytest
 
 from slipstream import Conf, handle, stream
+from slipstream.core import PausableStream
 
 
 async def async_iterable(it):
@@ -14,23 +15,22 @@ async def async_iterable(it):
 
 def test_handle():
     """Should register iterable."""
-    Conf().iterables = set()
+    Conf().iterables = {}
 
     iterable = async_iterable(range(1))
     iterable_key = str(id(iterable))
-    iterable_item = (iterable_key, iterable)
 
     @handle(iterable)
     def _(msg):
         return msg
 
-    assert Conf().iterables == set([iterable_item])
+    assert isinstance(Conf().iterables[iterable_key], PausableStream)
 
 
 @pytest.mark.asyncio
 async def test_stream(mocker):
     """Should start distributing messages for each registered iterable."""
-    Conf().iterables = set()
+    Conf().iterables = {}
     spy = mocker.spy(Conf(), '_distribute_messages')
 
     it = async_iterable(range(1))
