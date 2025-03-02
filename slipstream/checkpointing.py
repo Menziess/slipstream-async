@@ -201,13 +201,13 @@ class Checkpoint:
         self._downtime_callback = downtime_callback
         self._recovery_callback = recovery_callback
 
-        self.state = None
+        self.state = {}
         self.state_timestamp = None
 
         # Load checkpoint state from cache
         if self._cache:
             self.state = self._cache[
-                f'{self._cache_key}_state']
+                f'{self._cache_key}_state'] or {}
             self.state_timestamp = self._cache[
                 f'{self._cache_key}_state_timestamp']
             for dependency in self.dependencies.values():
@@ -260,23 +260,23 @@ class Checkpoint:
 
     async def check_pulse(
         self,
-        state,
-        timestamp: datetime | Any
+        timestamp: datetime | Any,
+        **kwargs: Any
     ) -> Optional[Any]:
         """Update state that can be used as checkpoint.
 
         Args:
+            timestamp (datetime | Any): Typically the event timestamp that is
+                compared to the event timestamp of a dependency stream.
             state (Any): Any information that can be used for reprocessing any
                 incorrect data that was sent out during downtime of a
                 dependency stream (offsets for example).
-            timestamp (datetime | Any): Typically the event timestamp that is
-                compared to the event timestamp of a dependency stream.
 
         Returns:
             Any: Typically the timedelta between the last state_timestamp and
                 the checkpoint_timestamp since the stream went down.
         """
-        self._save_state(state, timestamp)
+        self._save_state(timestamp, **kwargs)
 
         downtime = None
 
@@ -285,7 +285,11 @@ class Checkpoint:
             # When the dependency stream hasn't had any message yet
             # set the checkpoint to the very first available state
             if not dependency.checkpoint_timestamp:
-                self._save_checkpoint(dependency, state, timestamp)
+                self._save_checkpoint(
+                    dependency,
+                    self.state,
+                    self.state_timestamp
+                )
 
             # Trigger on the first dependency that is down and
             # pause the dependent stream
@@ -305,14 +309,19 @@ class Checkpoint:
         if any(_.is_down for _ in self.dependencies.values()):
             return downtime
 
-    def _save_state(self, state: Any, state_timestamp: datetime | Any) -> None:
+    def _save_state(
+        self,
+        state_timestamp: datetime | Any,
+        **kwargs: Any
+    ) -> None:
         """Save state of the stream (to cache)."""
-        self.state = state
+        self.state.update(**kwargs)
         self.state_timestamp = state_timestamp
         if not self._cache:
             return
-        self._cache[f'{self._cache_key}_state'] = state
-        self._cache[f'{self._cache_key}_state_timestamp'] = state_timestamp
+        self._cache[f'{self._cache_key}_state'] = self.state
+        self._cache[
+            f'{self._cache_key}_state_timestamp'] = self.state_timestamp
 
     def _save_checkpoint(
         self,
