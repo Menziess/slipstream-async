@@ -100,7 +100,7 @@ class PausableStream:
                     msg = await it.asend(self.signal)
                     if msg is not Signal.SENTINEL:
                         yield msg
-                    while self.signal is Signal.PAUSE:
+                    elif self.signal is Signal.PAUSE:
                         await sleep(0.1)
                 except StopAsyncIteration:
                     break
@@ -425,6 +425,9 @@ class Topic:
                                 logger.debug(f'{self.name} reactivated')
                                 consumer.resume(*consumer.assignment())
                                 break
+
+                            # Send heartbeats through getmany
+                            await consumer.getmany()
                             await sleep(1)
                     if (
                         isinstance(msg.key, bytes)
