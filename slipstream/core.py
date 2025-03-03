@@ -19,6 +19,8 @@ from typing import (
     cast,
 )
 
+from aiokafka import TopicPartition
+
 try:
     from aiokafka import (  # type: ignore
         AIOKafkaClient,
@@ -282,27 +284,54 @@ class Topic:
 
     async def seek(
         self,
-        offset: int,
-        consumer: Optional[AIOKafkaConsumer] = None
+        offset: int | dict[int, int],
+        consumer: Optional[AIOKafkaConsumer] = None,
+        timeout: float = 30.0
     ):
         """Seek to offset."""
         c = consumer or self.consumer
         if not c:
             raise RuntimeError('No consumer provided.')
 
-        partitions = c.assignment()
-        if not partitions:
-            raise RuntimeError('No partitions assigned to consumer.')
+        if isinstance(offset, int) and offset < READ_FROM_START:
+            raise ValueError('Offset must be bigger than -3.')
 
-        if offset < READ_FROM_START:
-            raise ValueError(f'Offset must be bigger than: {READ_FROM_START}.')
-        if offset == READ_FROM_START:
-            await c.seek_to_beginning(*partitions)
-        elif offset == READ_FROM_END:
-            await c.seek_to_end(*partitions)
+        # Wait until all partitions are assigned
+        partitions = c.partitions_for_topic(self.name) or set()
+        ready_partitions = set()
+        max_attempts = int(timeout / 0.1)
+        for i in range(max_attempts):
+            assignment = c.assignment()
+            ready_partitions = set(_.partition for _ in c.assignment())
+            if partitions.issubset(ready_partitions):
+                break
+            if i % 100 == 0:
+                logger.info(
+                    f'Waiting for partitions {partitions - ready_partitions}')
+            await sleep(0.1)
         else:
-            for p in partitions:
-                c.seek(p, offset)
+            raise RuntimeError(
+                f'Failed to assign {partitions} after {timeout}s, '
+                f'got: {ready_partitions}'
+            )
+
+        # The desired offset per partition
+        offsets = {
+            TopicPartition(self.name, p): offset
+            for p in partitions
+        } if isinstance(offset, int) else {
+            TopicPartition(self.name, p): o
+            for p, o in offset.items()
+        }
+
+        # Perform seek
+        if offset == READ_FROM_START:
+            await c.seek_to_beginning(*assignment)
+        elif offset == READ_FROM_END:
+            await c.seek_to_end(*assignment)
+        else:
+            for p, o in offsets.items():
+                c.seek(p, o)
 
     async def get_consumer(self) -> AIOKafkaConsumer:
         """Get started instance of Kafka consumer."""
