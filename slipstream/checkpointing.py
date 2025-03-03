@@ -23,7 +23,7 @@ class Dependency:
     ...     for emoji in '🏆📞🐟👌':
     ...         yield emoji
     >>> Dependency('emoji', emoji())
-    {'checkpoint_state': None, 'checkpoint_timestamp': None}
+    {'checkpoint_state': None, 'checkpoint_marker': None}
     """
 
     def __init__(
@@ -40,7 +40,7 @@ class Dependency:
         self.name = name
         self.dependency = dependency
         self.checkpoint_state = None
-        self.checkpoint_timestamp = None
+        self.checkpoint_marker = None
         self._downtime_threshold = downtime_threshold
         self._downtime_check = downtime_check or self._default_downtime_check
         self._recovery_check = recovery_check or self._default_recovery_check
@@ -51,18 +51,18 @@ class Dependency:
         cache: ICache,
         cache_key_prefix: str,
         checkpoint_state: Any,
-        checkpoint_timestamp: datetime
+        checkpoint_marker: datetime
     ):
         """Save checkpoint state to cache."""
         key = f'{cache_key_prefix}{self.name}_'
         cache[key + 'checkpoint_state'] = checkpoint_state
-        cache[key + 'checkpoint_timestamp'] = checkpoint_timestamp
+        cache[key + 'checkpoint_marker'] = checkpoint_marker
 
     def load(self, cache: ICache, cache_key_prefix: str) -> None:
         """Load checkpoint state from cache."""
         key = f'{cache_key_prefix}{self.name}_'
         self.checkpoint_state = cache[key + 'checkpoint_state']
-        self.checkpoint_timestamp = cache[key + 'checkpoint_timestamp']
+        self.checkpoint_marker = cache[key + 'checkpoint_marker']
 
     @staticmethod
     def _default_downtime_check(
@@ -75,12 +75,12 @@ class Dependency:
         `downtime_check` that takes a `Checkpoint` object.
         """
         if not (
-            isinstance(c.state_timestamp, datetime)
-            and isinstance(d.checkpoint_timestamp, datetime)
+            isinstance(c.state_marker, datetime)
+            and isinstance(d.checkpoint_marker, datetime)
         ):
             return None
 
-        diff = c.state_timestamp - d.checkpoint_timestamp
+        diff = c.state_marker - d.checkpoint_marker
         if diff > d._downtime_threshold:
             return diff
         return None
@@ -93,18 +93,18 @@ class Dependency:
         `recovery_check` that takes a `Checkpoint` object.
         """
         if not (
-            isinstance(c.state_timestamp, datetime)
-            and isinstance(d.checkpoint_timestamp, datetime)
+            isinstance(c.state_marker, datetime)
+            and isinstance(d.checkpoint_marker, datetime)
         ):
             return False
 
-        return d.checkpoint_timestamp >= c.state_timestamp
+        return d.checkpoint_marker >= c.state_marker
 
     def __iter__(self):
         """Get relevant values when dict is called."""
         yield from ({
             'checkpoint_state': self.checkpoint_state,
-            'checkpoint_timestamp': self.checkpoint_timestamp,
+            'checkpoint_marker': self.checkpoint_marker,
         }.items())
 
     def __repr__(self) -> str:
@@ -136,7 +136,7 @@ class Checkpoint:
     >>> @handle(dependent)
     ... async def dependent_handler(msg):
     ...     key, val, offset = msg.key, msg.value, msg.offset
-    ...     c.check_pulse(state=offset, timestamp=msg['event_timestamp'])
+    ...     c.check_pulse(state=offset, marker=msg['event_timestamp'])
     ...     yield key, msg
 
     >>> @handle(dependency)
@@ -147,13 +147,13 @@ class Checkpoint:
 
     On the first pulse check, no message might have been received
     from `dependency` yet. Therefore the dependency checkpoint is
-    updated with the initial state and timestamp of the
+    updated with the initial state and marker of the
     dependent stream:
 
     >>> from asyncio import run  # use await in
 
-    >>> run(c.check_pulse(state=0, timestamp=datetime(2025, 1, 1, 10)))
-    >>> c['dependency'].checkpoint_timestamp
+    >>> run(c.check_pulse(state=0, marker=datetime(2025, 1, 1, 10)))
+    >>> c['dependency'].checkpoint_marker
     datetime.datetime(2025, 1, 1, 10, 0)
 
     When a message is received in `dependency`, send a heartbeat
@@ -165,7 +165,7 @@ class Checkpoint:
     When the pulse is checked after a while, it's apparent that no
     dependency messages have been received for 30 minutes:
 
-    >>> run(c.check_pulse(state=100, timestamp=datetime(2025, 1, 1, 11)))
+    >>> run(c.check_pulse(state=100, marker=datetime(2025, 1, 1, 11)))
     datetime.timedelta(seconds=1800)
 
     Because the downtime surpasses the default `downtime_threshold`,
@@ -202,26 +202,26 @@ class Checkpoint:
         self._recovery_callback = recovery_callback
 
         self.state = {}
-        self.state_timestamp = None
+        self.state_marker = None
 
         # Load checkpoint state from cache
         if self._cache:
             self.state = self._cache[
                 f'{self._cache_key}_state'] or {}
-            self.state_timestamp = self._cache[
-                f'{self._cache_key}_state_timestamp']
+            self.state_marker = self._cache[
+                f'{self._cache_key}_state_marker']
             for dependency in self.dependencies.values():
                 dependency.load(self._cache, self._cache_key)
 
     async def heartbeat(
         self,
-        timestamp: datetime | Any,
+        marker: datetime | Any,
         dependency_name: Optional[str] = None,
     ) -> None:
         """Update checkpoint to latest state.
 
         Args:
-            timestamp (datetime | Any): Typically the event timestamp that is
+            marker (datetime | Any): Typically the event timestamp that is
                 compared to the event timestamp of a dependent stream.
             dependency_name (str, optional): Required when there are multiple
                 dependencies to specify which one the heartbeat is for.
@@ -238,7 +238,7 @@ class Checkpoint:
                 'for checkpoint with multiple dependencies.'
             )
 
-        self._save_checkpoint(dependency, self.state, timestamp)
+        self._save_checkpoint(dependency, self.state, marker)
 
         if dependency.is_down:
             if dependency._recovery_check(self, dependency):
@@ -260,23 +260,23 @@ class Checkpoint:
 
     async def check_pulse(
         self,
-        timestamp: datetime | Any,
+        marker: datetime | Any,
         **kwargs: Any
     ) -> Optional[Any]:
         """Update state that can be used as checkpoint.
 
         Args:
-            timestamp (datetime | Any): Typically the event timestamp that is
+            marker (datetime | Any): Typically the event timestamp that is
                 compared to the event timestamp of a dependency stream.
             state (Any): Any information that can be used for reprocessing any
                 incorrect data that was sent out during downtime of a
                 dependency stream (offsets for example).
 
         Returns:
-            Any: Typically the timedelta between the last state_timestamp and
-                the checkpoint_timestamp since the stream went down.
+            Any: Typically the timedelta between the last state_marker and
+                the checkpoint_marker since the stream went down.
         """
-        self._save_state(timestamp, **kwargs)
+        self._save_state(marker, **kwargs)
 
         downtime = None
 
@@ -284,11 +284,11 @@ class Checkpoint:
 
             # When the dependency stream hasn't had any message yet
             # set the checkpoint to the very first available state
-            if not dependency.checkpoint_timestamp:
+            if not dependency.checkpoint_marker:
                 self._save_checkpoint(
                     dependency,
                     self.state,
-                    self.state_timestamp
+                    self.state_marker
                 )
 
             # Trigger on the first dependency that is down and
@@ -311,32 +311,32 @@ class Checkpoint:
 
     def _save_state(
         self,
-        state_timestamp: datetime | Any,
+        state_marker: datetime | Any,
         **kwargs: Any
     ) -> None:
         """Save state of the stream (to cache)."""
         self.state.update(**kwargs)
-        self.state_timestamp = state_timestamp
+        self.state_marker = state_marker
         if not self._cache:
             return
         self._cache[f'{self._cache_key}_state'] = self.state
         self._cache[
-            f'{self._cache_key}_state_timestamp'] = self.state_timestamp
+            f'{self._cache_key}_state_marker'] = self.state_marker
 
     def _save_checkpoint(
         self,
         dependency: Dependency,
         checkpoint_state: Any,
-        checkpoint_timestamp: datetime | Any
+        checkpoint_marker: datetime | Any
     ) -> None:
         """Save state of the dependency checkpoint (to cache)."""
         dependency.checkpoint_state = checkpoint_state
-        dependency.checkpoint_timestamp = checkpoint_timestamp
+        dependency.checkpoint_marker = checkpoint_marker
         if not self._cache:
             return
         dependency.save(
             self._cache, self._cache_key,
-            checkpoint_state, checkpoint_timestamp)
+            checkpoint_state, checkpoint_marker)
 
     def __getitem__(self, key: str) -> Dependency:
         """Get dependency from dependencies."""
@@ -346,7 +346,7 @@ class Checkpoint:
         """Get relevant values when dict is called."""
         yield from ({
             'state': self.state,
-            'state_timestamp': self.state_timestamp,
+            'state_marker': self.state_marker,
             'checkpoints': {
                 dependency.name: dict(dependency)
                 for dependency in self.dependencies.values()
