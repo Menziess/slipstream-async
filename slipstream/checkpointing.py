@@ -226,10 +226,9 @@ class Checkpoint:
             dependency_name (str, optional): Required when there are multiple
                 dependencies to specify which one the heartbeat is for.
         """
-        if dependency_name and not (
-            dependency := self.dependencies.get(dependency_name)
-        ):
-            raise KeyError('Dependency does not exist.')
+        if dependency_name:
+            if not (dependency := self.dependencies.get(dependency_name)):
+                raise KeyError('Dependency does not exist.')
         elif len(self.dependencies) == 1:
             dependency = next(iter(self.dependencies.values()))
         else:
