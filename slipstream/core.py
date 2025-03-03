@@ -416,6 +416,19 @@ class Topic:
             try:
                 msg: ConsumerRecord[Any, Any]
                 async for msg in consumer:
+                    if (
+                        isinstance(msg.key, bytes)
+                        and not self.conf.get('key_deserializer')
+                    ):
+                        msg.key = msg.key.decode()
+                    if (
+                        isinstance(msg.value, bytes)
+                        and not self.conf.get('value_deserializer')
+                    ):
+                        msg.value = msg.value.decode()
+
+                    signal = yield msg
+
                     if signal is Signal.PAUSE:
                         consumer.pause(*consumer.assignment())
                         logger.debug(f'{self.name} paused')
@@ -429,17 +442,7 @@ class Topic:
                             # Send heartbeats through getmany
                             await consumer.getmany()
                             await sleep(1)
-                    if (
-                        isinstance(msg.key, bytes)
-                        and not self.conf.get('key_deserializer')
-                    ):
-                        msg.key = msg.key.decode()
-                    if (
-                        isinstance(msg.value, bytes)
-                        and not self.conf.get('value_deserializer')
-                    ):
-                        msg.value = msg.value.decode()
-                    signal = yield msg
+
             except Exception as e:
                 logger.error(
                     f'Error raised while consuming from Topic {self.name}: '
