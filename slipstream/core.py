@@ -97,11 +97,21 @@ class PausableStream:
             it = cast(AsyncGenerator[Any, Signal | Any], self._it)
             while True:
                 try:
-                    msg = await it.asend(self.signal)
+                    # The generator gets a chance to handle the signal
+                    signal = self.signal
+                    msg = await it.asend(signal)
+
+                    # When the stream is paused and the generator handles
+                    # the signal, it should yield SENTINEL
                     if msg is not Signal.SENTINEL:
                         yield msg
-                    elif self.signal is Signal.PAUSE:
-                        await sleep(0.1)
+
+                        # Otherwise we assume that the generator does not
+                        # handle the pause, so we pause here
+                        while signal is Signal.PAUSE:
+                            await sleep(0.1)
+                            signal = self.signal
+
                 except StopAsyncIteration:
                     break
         else:
