@@ -128,7 +128,7 @@ class Dependency:
 
 
 class Checkpoint:
-    """Pulse the heartbeat of dependency stream to handle downtimes.
+    """Pulse the heartbeat of dependency streams to handle downtimes.
 
     A checkpoint consists of a dependent stream and dependency streams.
 
@@ -165,7 +165,7 @@ class Checkpoint:
     updated with the initial state and marker of the
     dependent stream:
 
-    >>> from asyncio import run  # use await in
+    >>> from asyncio import run
 
     >>> run(c.check_pulse(marker=datetime(2025, 1, 1, 10), offset=8))
     >>> c['dependency'].checkpoint_marker
