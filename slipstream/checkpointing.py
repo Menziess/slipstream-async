@@ -16,6 +16,13 @@ from slipstream.utils import iscoroutinecallable
 logger = logging.getLogger(__name__)
 
 
+STATE_NAME = 'state'
+STATE_MARKER_NAME = 'state_marker'
+CHECKPOINT_STATE_NAME = 'checkpoint_state'
+CHECKPOINT_MARKER_NAME = 'checkpoint_marker'
+CHECKPOINTS_NAME = 'checkpoints'
+
+
 class Dependency:
     """Track the dependent stream state to recover from downtime.
 
@@ -55,14 +62,14 @@ class Dependency:
     ):
         """Save checkpoint state to cache."""
         key = f'{cache_key_prefix}{self.name}_'
-        cache[key + 'checkpoint_state'] = checkpoint_state
-        cache[key + 'checkpoint_marker'] = checkpoint_marker
+        cache[key + CHECKPOINT_STATE_NAME] = checkpoint_state
+        cache[key + CHECKPOINT_MARKER_NAME] = checkpoint_marker
 
     def load(self, cache: ICache, cache_key_prefix: str) -> None:
         """Load checkpoint state from cache."""
         key = f'{cache_key_prefix}{self.name}_'
-        self.checkpoint_state = cache[key + 'checkpoint_state']
-        self.checkpoint_marker = cache[key + 'checkpoint_marker']
+        self.checkpoint_state = cache[key + CHECKPOINT_STATE_NAME]
+        self.checkpoint_marker = cache[key + CHECKPOINT_MARKER_NAME]
 
     @staticmethod
     def _default_downtime_check(
@@ -103,8 +110,8 @@ class Dependency:
     def __iter__(self):
         """Get relevant values when dict is called."""
         yield from ({
-            'checkpoint_state': self.checkpoint_state,
-            'checkpoint_marker': self.checkpoint_marker,
+            CHECKPOINT_STATE_NAME: self.checkpoint_state,
+            CHECKPOINT_MARKER_NAME: self.checkpoint_marker,
         }.items())
 
     def __repr__(self) -> str:
@@ -207,9 +214,9 @@ class Checkpoint:
         # Load checkpoint state from cache
         if self._cache:
             self.state = self._cache[
-                f'{self._cache_key}_state'] or {}
+                f'{self._cache_key}_{STATE_NAME}'] or {}
             self.state_marker = self._cache[
-                f'{self._cache_key}_state_marker']
+                f'{self._cache_key}_{STATE_MARKER_NAME}']
             for dependency in self.dependencies.values():
                 dependency.load(self._cache, self._cache_key)
 
@@ -344,9 +351,9 @@ class Checkpoint:
     def __iter__(self):
         """Get relevant values when dict is called."""
         yield from ({
-            'state': self.state,
-            'state_marker': self.state_marker,
-            'checkpoints': {
+            STATE_NAME: self.state,
+            STATE_MARKER_NAME: self.state_marker,
+            CHECKPOINTS_NAME: {
                 dependency.name: dict(dependency)
                 for dependency in self.dependencies.values()
             }
