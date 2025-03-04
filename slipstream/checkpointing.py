@@ -85,7 +85,11 @@ class Dependency:
             isinstance(c.state_marker, datetime)
             and isinstance(d.checkpoint_marker, datetime)
         ):
-            return None
+            raise ValueError(
+                'Expecting either `datetime` markers in heartbeat and '
+                'check_pulse, or a custom downtime_check in dependency, '
+                f'got; {c.state_marker} and {d.checkpoint_marker}'
+            )
 
         diff = c.state_marker - d.checkpoint_marker
         if diff > d._downtime_threshold:
@@ -103,7 +107,11 @@ class Dependency:
             isinstance(c.state_marker, datetime)
             and isinstance(d.checkpoint_marker, datetime)
         ):
-            return False
+            raise ValueError(
+                'Expecting either `datetime` markers in heartbeat and '
+                'check_pulse, or a custom recovery_check in dependency, '
+                f'got; {c.state_marker} and {d.checkpoint_marker}'
+            )
 
         return d.checkpoint_marker > c.state_marker
 
@@ -143,7 +151,7 @@ class Checkpoint:
     >>> @handle(dependent)
     ... async def dependent_handler(msg):
     ...     key, val, offset = msg.key, msg.value, msg.offset
-    ...     c.check_pulse(state=offset, marker=msg['event_timestamp'])
+    ...     c.check_pulse(marker=msg['event_timestamp'], offset=offset)
     ...     yield key, msg
 
     >>> @handle(dependency)
@@ -159,7 +167,7 @@ class Checkpoint:
 
     >>> from asyncio import run  # use await in
 
-    >>> run(c.check_pulse(state=0, marker=datetime(2025, 1, 1, 10)))
+    >>> run(c.check_pulse(marker=datetime(2025, 1, 1, 10), offset=8))
     >>> c['dependency'].checkpoint_marker
     datetime.datetime(2025, 1, 1, 10, 0)
 
@@ -172,7 +180,7 @@ class Checkpoint:
     When the pulse is checked after a while, it's apparent that no
     dependency messages have been received for 30 minutes:
 
-    >>> run(c.check_pulse(state=100, marker=datetime(2025, 1, 1, 11)))
+    >>> run(c.check_pulse(marker=datetime(2025, 1, 1, 11), offset=9))
     datetime.timedelta(seconds=1800)
 
     Because the downtime surpasses the default `downtime_threshold`,
