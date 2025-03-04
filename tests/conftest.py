@@ -1,8 +1,9 @@
 """Common testing functionalities."""
 
 import signal
+from asyncio import sleep
 from contextlib import contextmanager
-from typing import Iterator
+from typing import AsyncIterable, Iterable, Iterator
 
 from pytest import fixture
 from testcontainers.kafka import KafkaContainer
@@ -49,3 +50,16 @@ def timeout():
             signal.alarm(seconds)
         yield start_timeout()
     return set_timeout
+
+
+async def iterable_to_async(it: Iterable) -> AsyncIterable:
+    """Convert Iterable to AsyncIterable."""
+    for msg in it:
+        await sleep(0.01)
+        yield msg
+
+
+async def emoji():
+    """Demo async iterable."""
+    for emoji in '🏆📞🐟👌':
+        yield emoji

@@ -2,6 +2,7 @@ import logging
 from typing import AsyncIterable, Callable
 
 import pytest
+from conftest import emoji
 
 from slipstream import Conf
 from slipstream.core import Topic
@@ -15,14 +16,10 @@ async def test_Conf(mocker):
     assert c.group_id == 'test'  # type: ignore
     assert c.iterables == {}
 
-    async def messages():
-        for emoji in '🏆':
-            yield emoji
-
     # Register iterable
     iterable = range(1)
     iterable_key = str(id(iterable))
-    iterable_item = iterable_key, messages()
+    iterable_item = iterable_key, emoji()
     c.register_iterable(*iterable_item)
 
     # Register handler
@@ -34,7 +31,12 @@ async def test_Conf(mocker):
 
     # Start distributing messages and confirm message was received
     await c.start(my_arg='test')
-    stub.assert_called_once_with('🏆', {'my_arg': 'test'})
+    assert stub.call_args_list == [
+        mocker.call('🏆', {'my_arg': 'test'}),
+        mocker.call('📞', {'my_arg': 'test'}),
+        mocker.call('🐟', {'my_arg': 'test'}),
+        mocker.call('👌', {'my_arg': 'test'}),
+    ]
 
 
 def test_get_iterable():
