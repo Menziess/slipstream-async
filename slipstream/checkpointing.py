@@ -252,7 +252,7 @@ class Checkpoint:
                 if key in c.iterables:
                     c.iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
-                    if iscoroutinecallable(self._downtime_callback):
+                    if iscoroutinecallable(self._recovery_callback):
                         await self._recovery_callback(self, dependency)
                     else:
                         self._recovery_callback(self, dependency)
