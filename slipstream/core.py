@@ -98,19 +98,18 @@ class PausableStream:
             while True:
                 try:
                     # The generator gets a chance to handle the signal
-                    signal = self.signal
-                    msg = await it.asend(signal)
+                    msg = await it.asend(self.signal)
 
                     # When the stream is paused and the generator handles
                     # the signal, it should yield SENTINEL
                     if msg is not Signal.SENTINEL:
-                        yield msg
 
                         # Otherwise we assume that the generator does not
                         # handle the pause, so we pause here
-                        while signal is Signal.PAUSE:
+                        while self.signal is Signal.PAUSE:
                             await sleep(0.1)
-                            signal = self.signal
+
+                        yield msg
 
                 except StopAsyncIteration:
                     break

@@ -98,7 +98,7 @@ class Dependency:
         ):
             return False
 
-        return d.checkpoint_marker >= c.state_marker
+        return d.checkpoint_marker > c.state_marker
 
     def __iter__(self):
         """Get relevant values when dict is called."""
