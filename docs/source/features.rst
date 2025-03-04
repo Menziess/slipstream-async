@@ -327,7 +327,7 @@ A checkpoint consists of a dependent stream and dependency streams:
         dependencies=[Dependency('dependency', dependency)]
     )
 
-Checkpoints automatically handle pausing of dependent streams if they are bound to user handler functions using handle:
+Checkpoints automatically handle pausing of dependent streams when they are bound to user handler functions (using ``handle``):
 
 ::
 

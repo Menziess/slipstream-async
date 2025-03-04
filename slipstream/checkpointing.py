@@ -144,7 +144,7 @@ class Checkpoint:
     ... )
 
     Checkpoints automatically handle pausing of dependent streams
-    if they are bound to user handler functions using handle:
+    when they are bound to user handler functions (using `handle`):
 
     >>> from slipstream import handle
 
