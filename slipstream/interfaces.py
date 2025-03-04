@@ -1,7 +1,7 @@
 """Slipstream interfaces."""
 
 from abc import ABCMeta, abstractmethod
-from typing import Any, TypeAlias, Union
+from typing import Any, TypeAlias
 
 Key: TypeAlias = str | int | float | bytes | bool
 
@@ -39,7 +39,7 @@ class ICache(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def __getitem__(self, key: Union[Key, list[Key]]) -> Any:
+    def __getitem__(self, key: Key | list[Key]) -> Any:
         """Get item from db or None."""
         raise NotImplementedError
 

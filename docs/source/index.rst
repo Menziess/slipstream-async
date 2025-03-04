@@ -13,29 +13,26 @@ A typical **slipstream** hello-world snippet would look something like this:
 
 ::
 
-  from asyncio import run
+    from asyncio import run
 
-  from slipstream import handle, stream
+    from slipstream import handle, stream
 
+    async def messages():
+        for emoji in '🏆📞🐟👌':
+            yield emoji
 
-  async def messages():
-      for emoji in '🏆📞🐟👌':
-          yield emoji
+    @handle(messages(), sink=[print])
+    def handle_message(msg):
+        yield f'Hello {msg}!'
 
-
-  @handle(messages(), sink=[print])
-  def handle_message(msg):
-      yield f'Hello {msg}!'
-
-
-  run(stream())
+    run(stream())
 
 ::
 
-  Hello 🏆!
-  Hello 📞!
-  Hello 🐟!
-  Hello 👌!
+    Hello 🏆!
+    Hello 📞!
+    Hello 🐟!
+    Hello 👌!
 
 This simple yet powerful flow can be used in combination with Kafka and caches to build complex stateful streaming applications.
 
@@ -54,47 +51,43 @@ Spin up a local kafka broker with `docker-compose.yml <https://github.com/Menzie
 
 .. code-block:: bash
 
-  docker compose up broker -d
+    docker compose up broker -d
 
 Run the customized hello-world snippet:
 
 ::
 
-  from asyncio import run
+    from asyncio import run
 
-  from slipstream import Topic, handle, stream
+    from slipstream import Topic, handle, stream
 
-  t = Topic('emoji', {
-      'bootstrap_servers': 'localhost:29091',
-      'group_instance_id': 'demo',
-      'group_id': 'demo',
-  })
+    t = Topic('emoji', {
+        'bootstrap_servers': 'localhost:29091',
+        'group_instance_id': 'demo',
+        'group_id': 'demo',
+    })
 
+    async def messages():
+        for emoji in '🏆📞🐟👌':
+            yield emoji
 
-  async def messages():
-      for emoji in '🏆📞🐟👌':
-          yield emoji
+    @handle(messages(), sink=[t])
+    def handle_message(msg):
+        yield None, f'emoji {msg}'
 
+    @handle(t, sink=[print])
+    def consume_message(msg):
+        emoji = msg.value
+        yield f'received: {emoji}'
 
-  @handle(messages(), sink=[t])
-  def handle_message(msg):
-      yield None, f'emoji {msg}'
-
-
-  @handle(t, sink=[print])
-  def consume_message(msg):
-      emoji = msg.value
-      yield f'received: {emoji}'
-
-
-  run(stream())
+    run(stream())
 
 ::
 
-  received: emoji 🏆
-  received: emoji 📞
-  received: emoji 🐟
-  received: emoji 👌
+    received: emoji 🏆
+    received: emoji 📞
+    received: emoji 🐟
+    received: emoji 👌
 
 Learn what else you can do from here:
 
