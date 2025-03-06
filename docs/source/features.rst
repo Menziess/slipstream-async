@@ -44,6 +44,10 @@ Cache
 
 Cache can be used to persist data.
 
+Install ``rocksdict`` separately or along with slipstream (unpinned)::
+
+    pip install slipstream-async[cache]
+
 ::
 
     from slipstream import Cache
@@ -297,3 +301,76 @@ When we run the application and call the endpoint, we'll receive the cache value
     00:16:59
     00:17:00
     ...
+
+Checkpoint
+----------
+
+A ``Checkpoint`` can be used to pulse the heartbeat of dependency streams to handle downtimes.
+
+The easiest way to grasp the concept is by looking at the output of these examples:
+
+1. `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854>`_
+2. `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b>`_
+
+A checkpoint consists of a dependent stream and dependency streams:
+
+::
+
+    async def emoji():
+        for emoji in '🏆📞🐟👌':
+            yield emoji
+
+    dependent, dependency = emoji(), emoji()
+
+    c = Checkpoint(
+        'dependent', dependent=dependent,
+        dependencies=[Dependency('dependency', dependency)]
+    )
+
+Checkpoints automatically handle pausing of dependent streams when they are bound to user handler functions (using ``handle``):
+
+::
+
+    @handle(dependency)
+    async def dependency_handler(msg):
+        key, val = msg.key, msg.value
+        await c.heartbeat(val['event_timestamp'])
+        yield key, val
+
+    @handle(dependent)
+    async def dependent_handler(msg):
+        key, val, offset = msg.key, msg.value, msg.offset
+        c.check_pulse(marker=msg['event_timestamp'], offset=offset)
+        yield key, msg
+
+On the first pulse check, no message might have been received from `dependency` yet.
+Therefore the dependency checkpoint is updated with the initial state and marker of the dependent stream:
+
+::
+
+    from asyncio import run
+
+    run(c.check_pulse(marker=datetime(2025, 1, 1, 10), offset=8))
+    c['dependency'].checkpoint_marker
+
+::
+
+    datetime.datetime(2025, 1, 1, 10, 0)
+
+When a message is received in `dependency`, send a heartbeat with its event time, which can be compared with the dependent event times to check for downtime:
+
+::
+
+    run(c.heartbeat(datetime(2025, 1, 1, 10, 30)))
+
+When the pulse is checked after a while, it's apparent that no
+dependency messages have been received for 30 minutes:
+
+::
+
+    run(c.check_pulse(marker=datetime(2025, 1, 1, 11), offset=9))
+
+::
+
+    datetime.timedelta(seconds=1800)
+
