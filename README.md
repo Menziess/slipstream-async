@@ -74,3 +74,4 @@ Follow the docs and set up a Kafka connection: [slipstream.readthedocs.io](https
 - [`slipstream.Cache`](slipstream/caching.py): store data to disk using [**rocksdict**](https://congyuwang.github.io/RocksDict/rocksdict.html)
 - [`slipstream.Conf`](slipstream/core.py): set global kafka configuration (can be overridden per topic)
 - [`slipstream.codecs.JsonCodec`](slipstream/codecs.py): serialize and deserialize json messages
+- [`slipstream.checkpointing.Checkpoint`](slipstream/checkpointing.py): recover from stream downtimes
