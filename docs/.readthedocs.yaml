@@ -9,10 +9,13 @@ build:
       - sphinx-apidoc -o docs/source/ slipstream -M -d 2 -f
 
 sphinx:
-  configuration: docs/source/conf.py
+  configuration: source/conf.py
 
 python:
   install:
     - method: pip
-      path: .
-    - requirements: docs/requirements.txt
+      path: ../..
+      extra_requirements:
+        - kafka
+        - cache
+    - requirements: requirements.txt

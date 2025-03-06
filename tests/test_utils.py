@@ -51,7 +51,6 @@ def test_Singleton():
     assert a is b
 
 
-@pytest.mark.forked  # disable when using debugger
 @pytest.mark.asyncio
 async def test_PubSub():
     """Should succesfully send and receive data."""
