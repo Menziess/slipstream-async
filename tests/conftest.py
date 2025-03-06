@@ -44,9 +44,11 @@ KAFKA_CONTAINER = 'confluentinc/cp-kafka:latest'
 def kafka():
     """Get running kafka broker."""
     kafka = KafkaContainer(KAFKA_CONTAINER)
-    kafka.start()
-    yield kafka.get_bootstrap_server()
-    kafka.stop()
+    try:
+        kafka.start()
+        yield kafka.get_bootstrap_server()
+    finally:
+        kafka.stop()
 
 
 @fixture
