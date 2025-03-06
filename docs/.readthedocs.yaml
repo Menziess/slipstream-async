@@ -9,8 +9,8 @@ build:
       - sphinx-apidoc -o docs/source/ slipstream -M -d 2 -f
 
 sphinx:
-  configuration: source/conf.py
+  configuration: docs/source/conf.py
 
 python:
   install:
-    - requirements: requirements.txt
+    - requirements: docs/requirements.txt
