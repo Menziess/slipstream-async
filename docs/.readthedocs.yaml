@@ -5,6 +5,8 @@ build:
   tools:
     python: "3.10"
   jobs:
+    pre_install:
+      - pip install -e ../..[docs,kafka,cache]
     pre_build:
       - sphinx-apidoc -o docs/source/ slipstream -M -d 2 -f
 
