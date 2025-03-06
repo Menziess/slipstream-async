@@ -13,9 +13,4 @@ sphinx:
 
 python:
   install:
-    - method: pip
-      path: ../..
-      extra_requirements:
-        - kafka
-        - cache
     - requirements: requirements.txt

@@ -1,1 +1,2 @@
+-e ../..[kafka,cache]
 sphinx-rtd-theme
