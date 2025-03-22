@@ -7,10 +7,10 @@ https://www.sphinx-doc.org/en/master/usage/configuration.html
 -- Project information -----------------------------------------------------
 https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 """
-
+from time import strftime
 
 project = 'slipstream'
-copyright = '2024, Menziess'
+copyright = f'{strftime("%Y")}, Menziess'
 author = 'Menziess'
 
 # -- General configuration ---------------------------------------------------
@@ -36,4 +36,4 @@ autosummary_generate = True
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'furo'
