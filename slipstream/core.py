@@ -249,7 +249,7 @@ class Topic:
         self,
         name: str,
         conf: dict[str, Any] = {},
-        offset: Optional[int] = None,
+        offset: Optional[int | dict[int, int]] = None,
         codec: Optional[ICodec] = None,
         dry: bool = False,
     ):
