@@ -10,10 +10,10 @@ Slipstream can be installed using ``pip``:
 Optional Dependencies
 ^^^^^^^^^^^^^^^^^^^^^
 
-Keeping the package lightweight and granting you full control, some dependencies can be:
+Some :doc:`features` require extra dependencies that are not installed by default, keeping the package small and giving you full control.
 
-- Pinned down to specific versions for stability and reproducability
-- Installed using the extras notation in order to use the latest version
+- Pin specific versions for stability and reproducibility
+- Install latest using the extras notation
 
 Kafka
 -----
