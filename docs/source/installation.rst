@@ -18,7 +18,7 @@ Keeping the package lightweight and granting you full control, some dependencies
 Kafka
 -----
 
-:ref:`Topic` uses `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood, the default kafka client:
+:ref:`features:Topic` uses `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood, the default kafka client:
 
 .. code-block:: c
 
@@ -28,7 +28,7 @@ Kafka
 RocksDict
 ---------
 
-:ref:`Cache` is a basic wrapper around `rocksdict <https://congyuwang.github.io/RocksDict/rocksdict.html>`_, the default caching implementation:
+:ref:`features:Cache` is a basic wrapper around `rocksdict <https://congyuwang.github.io/RocksDict/rocksdict.html>`_, the default caching implementation:
 
 .. code-block:: c
 
