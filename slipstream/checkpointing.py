@@ -13,7 +13,7 @@ from slipstream.core import Conf, Signal
 from slipstream.interfaces import ICache
 from slipstream.utils import iscoroutinecallable
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 STATE_NAME = 'state'
@@ -261,7 +261,7 @@ class Checkpoint:
                 return
 
             if not any(_.is_down for _ in self.dependencies.values()):
-                logger.debug(
+                _logger.debug(
                     f'Dependency "{dependency.name}" downtime resolved')
                 key, c = str(id(self.dependent)), Conf()
                 if key in c.iterables:
@@ -308,7 +308,7 @@ class Checkpoint:
             # Trigger on the first dependency that is down and
             # pause the dependent stream
             if downtime := dependency._downtime_check(self, dependency):
-                logger.debug(
+                _logger.debug(
                     f'Downtime of dependency "{dependency.name}" detected')
                 key, c = str(id(self.dependent)), Conf()
                 if key in c.iterables:

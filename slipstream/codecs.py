@@ -1,12 +1,9 @@
 """Slipstream codecs."""
 
-import logging
 from json import dumps, loads
 from typing import Any
 
 from slipstream.interfaces import ICodec
-
-logger = logging.getLogger(__name__)
 
 
 class JsonCodec(ICodec):

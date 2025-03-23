@@ -36,6 +36,7 @@ autodoc_default_options = {
 
 autosectionlabel_prefix_document = True
 
+autoapi_python_path = 'slipstream'
 autoapi_dirs = ['../../slipstream']
 autoapi_ignore = exclude_patterns
 autoapi_type = 'python'

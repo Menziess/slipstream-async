@@ -26,7 +26,14 @@ try:
 except ImportError:
     pass
 
-MB, MINUTES = 1024 * 1024, 60
+__all__ = [
+    'MB',
+    'MINUTES',
+]
+
+
+MB = 1024 * 1024
+MINUTES = 60
 
 if rocksdict_available:
     from rocksdict import (
