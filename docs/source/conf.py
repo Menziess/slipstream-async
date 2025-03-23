@@ -30,7 +30,6 @@ autodoc_default_options = {
     'undoc-members': True,
     'show-inheritance': True,
 }
-autosummary_generate = True
 
 autoapi_dirs = ['../../slipstream']
 autoapi_ignore = exclude_patterns
