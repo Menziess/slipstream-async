@@ -20,12 +20,11 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
+    'autoapi.extension',
 ]
 
 templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', '.venv/*']
+exclude_patterns = ['*_build', '*Thumbs.db', '*.DS_Store', '*.venv/*']
 autodoc_default_options = {
     'members': True,
     'undoc-members': True,
@@ -33,7 +32,22 @@ autodoc_default_options = {
 }
 autosummary_generate = True
 
+autoapi_dirs = ['../../slipstream']
+autoapi_ignore = exclude_patterns
+autoapi_type = 'python'
+autoapi_template_dir = '_templates/autoapi'
+autoapi_keep_files = True
+autodoc_typehints = 'signature'
+autoapi_options = [
+    'members',
+    'undoc-members',
+    'show-inheritance',
+    'show-module-summary',
+    'imported-members',
+]
+
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = 'furo'
+pygments_style = 'sphinx'
