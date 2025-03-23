@@ -42,6 +42,14 @@ from slipstream.utils import (
     iscoroutinecallable,
 )
 
+__all__ = [
+    'KAFKA_CLASSES_PARAMS',
+    'READ_FROM_START',
+    'READ_FROM_END',
+    'Signal',
+    'PausableStream',
+]
+
 KAFKA_CLASSES_PARAMS: dict[str, Any] = {
     **get_params_names(AIOKafkaConsumer),
     **get_params_names(AIOKafkaProducer),
