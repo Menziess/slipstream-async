@@ -9,9 +9,10 @@ https://www.sphinx-doc.org/en/master/usage/configuration.html#project-informatio
 """
 from time import strftime
 
-project = 'slipstream'
-copyright = f'{strftime("%Y")}, Menziess'
+project = 'Slipstream'
+html_title = project
 author = 'Menziess'
+copyright = f'{strftime("%Y")}, {author}'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
