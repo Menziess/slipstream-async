@@ -21,6 +21,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
+    'sphinx.ext.autosectionlabel',
     'autoapi.extension',
 ]
 

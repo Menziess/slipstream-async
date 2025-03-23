@@ -1,7 +1,5 @@
-.. _features:
-
 Features
-============
+========
 
 Can't find what you seek? Create a `new issue <https://github.com/Menziess/slipstream/issues/new>`_.
 

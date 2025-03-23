@@ -1,7 +1,7 @@
 .. _index:
 
-Slipstream Documentation
-========================
+Documentation
+=============
 
 .. currentmodule:: slipstream.core
 
@@ -12,7 +12,7 @@ Slipstream Documentation
    :members:
 
 Contents
---------
+^^^^^^^^
 
 .. toctree::
    :maxdepth: 3
