@@ -3,9 +3,9 @@ Getting Started
 
 Slipstream can be summarized as:
 
-- ``iterables``: act as sources for our handler functions
+- ``iterables``: act as sources for handler functions
 - ``callables``: can be used as sinks
-- ``handle`` and ``stream``: a data-flow model used to parallelize stream processing
+- ``handle`` and ``stream``: a data-flow model that parallelizes stream processing
 
 A typical **slipstream** hello-world snippet would look something like this:
 
@@ -34,16 +34,8 @@ A typical **slipstream** hello-world snippet would look something like this:
 
 This simple yet powerful flow can be used in combination with Kafka and caches to build complex stateful streaming applications.
 
-Install using ``pip``::
-
-    pip install slipstream-async
-
 Kafka
------
-
-Install ``aiokafka`` separately or along with slipstream (unpinned)::
-
-    pip install slipstream-async[kafka]
+^^^^^
 
 Spin up a local kafka broker with `docker-compose.yml <https://github.com/Menziess/slipstream/blob/master/docker-compose.yml>`_ to follow along:
 

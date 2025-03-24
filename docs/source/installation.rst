@@ -15,20 +15,20 @@ Some :doc:`features <features>` require extra dependencies that are not installe
 - Pin specific versions for stability and reproducibility
 - Install latest using the extras notation
 
-Kafka
+Topic
 -----
 
-:ref:`features:Topic` uses `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood, the default kafka client:
+:ref:`features:Topic` is the default kafka client, using `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood.
 
 .. code-block:: c
 
     pip install aiokafka==0.12.0
     pip install slipstream-async[kafka]
 
-RocksDict
----------
+Cache
+-----
 
-:ref:`features:Cache` is a basic wrapper around `rocksdict <https://rocksdict.github.io/RocksDict/rocksdict.html>`_, the default caching implementation:
+:ref:`features:Cache` is the default embedded cache, a basic wrapper around `rocksdict <https://rocksdict.github.io/RocksDict/rocksdict.html>`_.
 
 .. code-block:: c
 

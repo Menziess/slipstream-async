@@ -1,14 +1,9 @@
 Documentation
 =============
 
-.. currentmodule:: slipstream.core
-
-.. autosummary::
-   Conf
-
-.. automodule:: slipstream.core
-   :members:
-   :no-index:
+.. image:: https://raw.githubusercontent.com/menziess/slipstream/master/res/logo.png
+   :width: 25%
+   :align: right
 
 Contents
 ^^^^^^^^
@@ -18,5 +13,6 @@ Contents
 
    installation
    getting_started
+   cookbook
    features
    autoapi/index

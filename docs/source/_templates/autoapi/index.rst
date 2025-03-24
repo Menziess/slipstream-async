@@ -1,7 +1,7 @@
 API
 ===
 
-This page contains auto-generated API reference documentation `slipstream-async </>`_.
+Slipstream auto-generated API reference:
 
 .. toctree::
    :titlesonly:
