@@ -8,6 +8,7 @@ Documentation
 
 .. automodule:: slipstream.core
    :members:
+   :no-index:
 
 Contents
 ^^^^^^^^
