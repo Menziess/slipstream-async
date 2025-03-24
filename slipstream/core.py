@@ -43,7 +43,6 @@ from slipstream.utils import (
 )
 
 __all__ = [
-    'KAFKA_CLASSES_PARAMS',
     'READ_FROM_START',
     'READ_FROM_END',
     'Signal',

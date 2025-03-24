@@ -29,6 +29,7 @@ except ImportError:
 __all__ = [
     'MB',
     'MINUTES',
+    'Cache',
 ]
 
 

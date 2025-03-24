@@ -71,7 +71,7 @@ Follow the docs and set up a Kafka connection: [slipstream.readthedocs.io](https
 - [`slipstream.handle`](slipstream/__init__.py): bind streams (iterables) and sinks (callables) to user defined handler functions
 - [`slipstream.stream`](slipstream/__init__.py): start streaming
 - [`slipstream.Topic`](slipstream/core.py): consume from (iterable), and produce to (callable) kafka using [**aiokafka**](https://aiokafka.readthedocs.io/en/stable/index.html)
-- [`slipstream.Cache`](slipstream/caching.py): store data to disk using [**rocksdict**](https://congyuwang.github.io/RocksDict/rocksdict.html)
+- [`slipstream.Cache`](slipstream/caching.py): store data to disk using [**rocksdict**](https://rocksdict.github.io/RocksDict/rocksdict.html)
 - [`slipstream.Conf`](slipstream/core.py): set global kafka configuration (can be overridden per topic)
 - [`slipstream.codecs.JsonCodec`](slipstream/codecs.py): serialize and deserialize json messages
 - [`slipstream.checkpointing.Checkpoint`](slipstream/checkpointing.py): recover from stream downtimes
