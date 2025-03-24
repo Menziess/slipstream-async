@@ -5,6 +5,8 @@ Documentation
    :width: 25%
    :align: right
 
+Slipstream provides a data-flow model to simplify development of stateful streaming applications.
+
 Contents
 ^^^^^^^^
 
