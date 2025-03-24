@@ -27,14 +27,8 @@ extensions = [
     'autoapi.extension',
 ]
 
-autodoc_typehints = 'signature'
-autodoc_default_options = {
-    'members': True,
-    'undoc-members': True,
-    'show-inheritance': True,
-}
-
 autosectionlabel_prefix_document = True
+autosectionlabel_maxdepth = 2
 
 autoapi_python_path = 'slipstream'
 autoapi_dirs = ['../../slipstream']
