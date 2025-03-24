@@ -10,7 +10,7 @@ Slipstream can be installed using ``pip``:
 Optional Dependencies
 ^^^^^^^^^^^^^^^^^^^^^
 
-Some :doc:`features` require extra dependencies that are not installed by default, keeping the package small and giving you full control.
+Some :doc:`features <features>` require extra dependencies that are not installed by default, keeping the package small and giving you full control.
 
 - Pin specific versions for stability and reproducibility
 - Install latest using the extras notation
@@ -28,7 +28,7 @@ Kafka
 RocksDict
 ---------
 
-:ref:`features:Cache` is a basic wrapper around `rocksdict <https://congyuwang.github.io/RocksDict/rocksdict.html>`_, the default caching implementation:
+:ref:`features:Cache` is a basic wrapper around `rocksdict <https://rocksdict.github.io/RocksDict/rocksdict.html>`_, the default caching implementation:
 
 .. code-block:: c
 

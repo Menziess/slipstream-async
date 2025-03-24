@@ -28,7 +28,6 @@ extensions = [
 ]
 
 autosectionlabel_prefix_document = True
-autosectionlabel_maxdepth = 2
 
 autoapi_python_path = 'slipstream'
 autoapi_dirs = ['../../slipstream']

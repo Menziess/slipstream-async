@@ -63,7 +63,7 @@ Install ``rocksdict`` separately or along with slipstream (unpinned)::
     phone 📞
     prize 🏆
 
-Cache is a basic wrapper around `rocksdict <https://congyuwang.github.io/RocksDict/rocksdict.html>`_.
+Cache is a basic wrapper around `rocksdict <https://rocksdict.github.io/RocksDict/rocksdict.html>`_.
 
 To prevent race conditions, the ``transaction`` context manager can be used:
 
