@@ -1,7 +1,7 @@
 Documentation
 =============
 
-.. image:: ../../res/logo.png
+.. image:: _static/logo.png
    :width: 25%
    :align: right
 
