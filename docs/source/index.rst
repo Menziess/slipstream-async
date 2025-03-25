@@ -1,7 +1,7 @@
 Documentation
 =============
 
-.. image:: https://raw.githubusercontent.com/menziess/slipstream/master/res/logo.png
+.. image:: ../../res/logo.png
    :width: 25%
    :align: right
 
@@ -11,7 +11,12 @@ Slipstream provides a data-flow model to simplify development of stateful stream
 - **Simplicity:** parallelize using a decorator mapping sources to sinks
 - **Speed:** sensible and optimized defaults to get started
 
-Because everything is built on top of basic python building blocks, standard functionality like timers aren't part of the library, but can simply be build using the standard
+Your typical stateful streaming application:
+
+- **Connects** to many sources: Kafka clusters, Streaming API's, et cetera
+- **Processes** streams in parallel: deserializing, aggregating, joining
+- **Persists** and looks up state: using RocksDB or any other database
+- **Recovers** from crashes and stream downtime: by persisting state to disk and using checkpoints to pause streams or send out corrections
 
 ::
 

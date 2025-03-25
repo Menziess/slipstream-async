@@ -4,7 +4,7 @@
 
 # Slipstream
 
-<img src="https://raw.githubusercontent.com/menziess/slipstream/master/res/logo.png" width="25%" height="25%" align="right" />
+<img src="docs/_static/logo.png" width="25%" height="25%" align="right" />
 
 Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
@@ -45,7 +45,7 @@ Async `iterables` are sources, (async) `callables` are sinks.
 
 Decorate handler functions using `handle`, then run `stream` to start processing:
 
-<img src="https://raw.githubusercontent.com/menziess/slipstream/master/res/demo.gif" />
+<img src="docs/_static/demo.gif" />
 
 Multiple sources and sinks can be provided to establish many-to-many relations between them.
 The 4 emoji's were printed using the callable `print`.
