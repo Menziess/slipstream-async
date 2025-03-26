@@ -7,20 +7,20 @@ Documentation
 
 Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
-- **Simplicity:** parallelize using a decorator, maps sources to sinks
-- **Freedom:** use any Python code without limiting abstractions
-- **Speed:** sensible and optimized defaults to get started
+- **Simplicity:** parallelizing processing, mapping sources to sinks
+- **Freedom:** allowing arbitrary code free of limiting abstractions
+- **Speed:** optimized and configurable defaults to get started quickly
 
-Your typical stateful streaming application:
-
-- **Connects** to many sources: Kafka clusters, Streaming API's, et cetera
-- **Processes** streams in parallel: deserializing, aggregating, joining
-- **Recovers** from crashes and stream downtime
+Consume any source that can be turned into an ``Async Iterable``; Kafka, streaming API's, et cetera.
+Sink or cache data to any ``Callable``; Kafka, RocksDB, API's.
+Perform any arbitrary stateful operation -- joining, aggregating, filtering -- using regular Python code.
+Detect dependency stream downtimes, pause dependent streams, or send out corrections.
 
 Demo
 ^^^^
 
-One such source could be a simple timer for example, any ``Async Iterable`` will do:
+Because everything is built with basic python building blocks, framework-like features can be crafted with ease.
+For instance, while timers aren't included, you can whip one up effortlessly:
 
 ::
 
@@ -31,13 +31,13 @@ One such source could be a simple timer for example, any ``Async Iterable`` will
             yield
             await sleep(interval)
 
-For our sink we will use the ``Callable`` ``print``:
+We'll use ``print`` as our sink:
 
 .. code-block:: python
 
     print
 
-In our case we will output a fish that swims downstream on a regular 1 second interval.
+Let's send our mascot 🐟 "blub" downstream on a regular 1 second interval:
 
 ::
 
@@ -55,12 +55,14 @@ In our case we will output a fish that swims downstream on a regular 1 second in
     # 🐟 - blub
     # ...
 
-With :py:class:`slipstream.stream` we can start processing the ``Async Iterables`` sources, and with :py:class:`slipstream.handle` we can direct the flow from these sources through our handler functions into our sinks.
+Some things that stand out:
 
-Because everything is built with basic python building blocks, framework-like features can be crafted with ease.
-For instance, while timers aren't included, you can whip one up effortlessly.
+- We've created an ``Async Iterable`` source ``timer()`` (not generating data, just triggering the handler)
+- We used :py:class:`slipstream.handle` to bind the source and sink to the handler function ``handler``
+- We yielded ``🐟 - blub``, which is sent to each sink, in this case just ``print``
+- Upon running :py:class:`slipstream.stream` the flow is directed from sources via handlers into the sinks
 
-Explore the :doc:`cookbook <cookbook>` for more recipes!
+So that's it, explore Slipstream :doc:`features <features>` or the :doc:`cookbook <cookbook>` for more recipes!
 
 Contents
 ^^^^^^^^

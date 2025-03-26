@@ -544,7 +544,7 @@ async def _sink_output(
 
 def handle(
     *iterable: AsyncIterable[Any],
-    sink: Iterable[AsyncCallable] = []
+    sink: Iterable[Callable | AsyncCallable] = []
 ):
     """Snaps function to stream.
 
