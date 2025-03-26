@@ -13,6 +13,7 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    TypeVar,
 )
 
 from slipstream.interfaces import ICache, Key
@@ -35,6 +36,7 @@ __all__ = [
 
 MB = 1024 * 1024
 MINUTES = 60
+T = TypeVar('T')
 
 if rocksdict_available:
     from rocksdict import (
@@ -194,9 +196,9 @@ if rocksdict_available:
         def get(
             self,
             key: Key | list[Key],
-            default: Any = None,
+            default: T = None,
             read_opt: ReadOptions | None = None
-        ) -> Optional[Any]:
+        ) -> Any | T:
             """Get item from database by key."""
             return self.db.get(key, default, read_opt)
 

@@ -58,14 +58,16 @@ Let's send our mascot 🐟 "blub" downstream on a regular 1 second interval:
 Some things that stand out:
 
 - We've created an ``Async Iterable`` source ``timer()`` (not generating data, just triggering the handler)
-- We used :py:class:`slipstream.handle` to bind the source and sink to the handler function ``handler``
-- We yielded ``🐟 - blub``, which is sent to each sink, in this case just ``print``
-- Upon running :py:class:`slipstream.stream` the flow is directed from sources via handlers into the sinks
+- We used :py:class:`slipstream.handle` to bind the sources and sinks to the ``handler`` function
+- We yielded ``🐟 - blub``, which is sent to all the ``Callable`` sinks (just ``print`` in this case)
+- Running :py:class:`slipstream.stream` starts the flow from sources via handlers into the sinks
 
-So that's it, explore Slipstream :doc:`features <features>` or the :doc:`cookbook <cookbook>` for more recipes!
+So that's the data flow model!
 
 Contents
 ^^^^^^^^
+
+Explore the :doc:`cookbook <cookbook>` for more recipes! Or read through Slipstream's list of :doc:`features <features>` next.
 
 .. toctree::
    :maxdepth: 2
