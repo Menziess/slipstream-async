@@ -49,6 +49,77 @@ Adding ``asyncio.sleep`` allows other coroutines to run during the delay.
             yield msg
             await sleep(0.01)
 
+Joins
+^^^^^
+
+Stream-stream joins can be performed using :ref:`Cache <features:cache>`.
+
+We can try to figure out what the ``weather`` was like during each ``activity``:
+
+::
+
+    from datetime import datetime as dt
+
+    weather_messages = iter([
+        {'timestamp': dt(2023, 1, 1, 10), 'value': '🌞'},
+        {'timestamp': dt(2023, 1, 1, 11), 'value': '⛅'},
+        {'timestamp': dt(2023, 1, 1, 12), 'value': '🌦️'},
+        {'timestamp': dt(2023, 1, 1, 13), 'value': '🌧'},
+    ])
+    activity_messages = iter([
+        {'timestamp': dt(2023, 1, 1, 10, 30), 'value': 'swimming'},  # 🌞
+        {'timestamp': dt(2023, 1, 1, 11, 30), 'value': 'walking home'},  # ⛅
+        {'timestamp': dt(2023, 1, 1, 12, 30), 'value': 'shopping'},  # 🌦️
+        {'timestamp': dt(2023, 1, 1, 13, 10), 'value': 'lunch'},  # 🌧
+    ])
+
+If we cache the ``weather`` updates using their (POSIX) event-time as a key, we can find the nearest timestamp value using a temporal-join (nearby-join / merge-as-of):
+
+::
+
+    from asyncio import run, sleep
+
+    from slipstream import Cache, handle, stream
+
+    weather_cache = Cache('state/weather')
+
+    async def async_iterable(it):
+        for msg in it:
+            yield msg
+            await sleep(0.01)
+
+    @handle(async_iterable(weather_messages), sink=[weather_cache, print])
+    def weather_handler(w):
+        unix_ts = w['timestamp'].timestamp()
+        yield unix_ts, w
+
+    @handle(async_iterable(activity_messages), sink=[print])
+    def activity_handler(a):
+        unix_ts = a['timestamp'].timestamp()
+
+        for w in weather_cache.values(backwards=True, from_key=unix_ts):
+            yield f'>>> The weather during {a["value"]} was {w["value"]}'
+            return
+
+        yield a['value'], '?'
+
+    run(stream())
+
+::
+
+    (1672563600.0, {'timestamp': datetime.datetime(2023, 1, 1, 10, 0), 'value': '🌞'})
+    >>> The weather during swimming was 🌞
+    (1672567200.0, {'timestamp': datetime.datetime(2023, 1, 1, 11, 0), 'value': '⛅'})
+    >>> The weather during walking home was ⛅
+    (1672570800.0, {'timestamp': datetime.datetime(2023, 1, 1, 12, 0), 'value': '🌦️'})
+    >>> The weather during shopping was 🌦️
+    (1672574400.0, {'timestamp': datetime.datetime(2023, 1, 1, 13, 0), 'value': '🌧'})
+    >>> The weather during lunch was 🌧
+
+This operation requires the ``weather`` updates to be received in time. If the ``weather`` stream goes down, the ``activity`` stream will be enriched with stale data.
+
+We can use stream synchronization to detect dependency downtime, pause the dependent stream, and possibly send out corrections.
+
 Endpoint
 ^^^^^^^^
 
