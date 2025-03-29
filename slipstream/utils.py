@@ -1,6 +1,5 @@
 """Slipstream utilities."""
 
-import logging
 from asyncio import Queue
 from inspect import iscoroutinefunction, signature
 from typing import (
@@ -10,8 +9,6 @@ from typing import (
     Callable,
     TypeAlias,
 )
-
-logger = logging.getLogger(__name__)
 
 AsyncCallable: TypeAlias = Callable[..., Awaitable[Any]] | Callable[..., Any]
 

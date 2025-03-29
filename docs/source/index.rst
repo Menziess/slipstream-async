@@ -1,109 +1,79 @@
-.. _index:
+Documentation
+=============
 
-Slipstream documentation
-========================
+.. image:: _static/logo.png
+   :width: 25%
+   :align: right
 
-Slipstream can be summarized as:
+Slipstream provides a data-flow model to simplify development of stateful streaming applications.
 
-- ``iterables``: act as sources for our handler functions
-- ``callables``: can be used as sinks
-- ``handle`` and ``stream``: a data-flow model used to parallelize stream processing
+- **Simplicity:** parallelizing processing, mapping sources to sinks
+- **Freedom:** allowing arbitrary code free of limiting abstractions
+- **Speed:** optimized and configurable defaults to get started quickly
 
-A typical **slipstream** hello-world snippet would look something like this:
+Consume any source that can be turned into an ``Async Iterable``; Kafka, streaming API's, et cetera.
+Sink or cache data to any ``Callable``; Kafka, RocksDB, API's.
+Perform any arbitrary stateful operation -- joining, aggregating, filtering -- using regular Python code.
+Detect dependency stream downtimes, pause dependent streams, or send out corrections.
+
+Demo
+^^^^
+
+Because everything is built with basic python building blocks, framework-like features can be crafted with ease.
+For instance, while timers aren't included, you can whip one up effortlessly:
 
 ::
 
-    from asyncio import run
+    from asyncio import run, sleep
+
+    async def timer(interval=1.0):
+        while True:
+            yield
+            await sleep(interval)
+
+We'll use ``print`` as our sink:
+
+.. code-block:: python
+
+    print
+
+Let's send our mascot 🐟 "blub" downstream on a regular 1 second interval:
+
+::
 
     from slipstream import handle, stream
 
-    async def messages():
-        for emoji in '🏆📞🐟👌':
-            yield emoji
-
-    @handle(messages(), sink=[print])
-    def handle_message(msg):
-        yield f'Hello {msg}!'
+    @handle(timer(), sink=[print])
+    def handler():
+        yield '🐟 - blub'
 
     run(stream())
 
-::
 
-    Hello 🏆!
-    Hello 📞!
-    Hello 🐟!
-    Hello 👌!
+    # 🐟 - blub
+    # 🐟 - blub
+    # 🐟 - blub
+    # ...
 
-This simple yet powerful flow can be used in combination with Kafka and caches to build complex stateful streaming applications.
+Some things that stand out:
 
-Install using ``pip``::
+- We've created an ``Async Iterable`` source ``timer()`` (not generating data, just triggering the handler)
+- We used :py:class:`slipstream.handle` to bind the sources and sinks to the ``handler`` function
+- We yielded ``🐟 - blub``, which is sent to all the ``Callable`` sinks (just ``print`` in this case)
+- Running :py:class:`slipstream.stream` starts the flow from sources via handlers into the sinks
 
-    pip install slipstream-async
+So that's the data flow model!
 
-Kafka
------
+Contents
+^^^^^^^^
 
-Install ``aiokafka`` separately or along with slipstream (unpinned)::
-
-    pip install slipstream-async[kafka]
-
-Spin up a local kafka broker with `docker-compose.yml <https://github.com/Menziess/slipstream/blob/master/docker-compose.yml>`_ to follow along:
-
-.. code-block:: bash
-
-    docker compose up broker -d
-
-Run the customized hello-world snippet:
-
-::
-
-    from asyncio import run
-
-    from slipstream import Topic, handle, stream
-
-    t = Topic('emoji', {
-        'bootstrap_servers': 'localhost:29091',
-        'group_instance_id': 'demo',
-        'group_id': 'demo',
-    })
-
-    async def messages():
-        for emoji in '🏆📞🐟👌':
-            yield emoji
-
-    @handle(messages(), sink=[t])
-    def handle_message(msg):
-        yield None, f'emoji {msg}'
-
-    @handle(t, sink=[print])
-    def consume_message(msg):
-        emoji = msg.value
-        yield f'received: {emoji}'
-
-    run(stream())
-
-::
-
-    received: emoji 🏆
-    received: emoji 📞
-    received: emoji 🐟
-    received: emoji 👌
-
-Learn what else you can do from here:
+Proceed by interacting with Kafka and caching application state in: :doc:`getting started <getting_started>`.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
 
+   installation
+   getting_started
+   cookbook
    features
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Modules:
-
-   modules
-
-Indices and tables
-------------------
-
-* :ref:`genindex`
+   autoapi/index

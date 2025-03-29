@@ -1,12 +1,10 @@
-.. _features:
-
 Features
-============
+========
 
-Can't find what you seek? Create a `new issue <https://github.com/Menziess/slipstream/issues/new>`_.
+Slipstream missing a feature? Create a `new issue <https://github.com/Menziess/slipstream/issues/new>`_.
 
 Topic
------
+^^^^^
 
 Topic can be used to interact with kafka.
 
@@ -37,10 +35,10 @@ Topic can be used to interact with kafka.
     trophy 🏆
     fish 🐟
 
-Topic uses `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood.
+Topic uses `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood, see :doc:`installation <installation>`.
 
 Cache
------
+^^^^^
 
 Cache can be used to persist data.
 
@@ -65,7 +63,7 @@ Install ``rocksdict`` separately or along with slipstream (unpinned)::
     phone 📞
     prize 🏆
 
-Cache is a basic wrapper around `rocksdict <https://congyuwang.github.io/RocksDict/rocksdict.html>`_.
+Cache is a basic wrapper around `rocksdict <https://rocksdict.github.io/RocksDict/rocksdict.html>`_, see :doc:`installation <installation>`.
 
 To prevent race conditions, the ``transaction`` context manager can be used:
 
@@ -80,7 +78,7 @@ To prevent race conditions, the ``transaction`` context manager can be used:
 - Reads won't be limited by ongoing transactions
 
 Conf
-----
+^^^^
 
 Conf can be used to set default kafka configurations.
 
@@ -113,7 +111,7 @@ Conf can be used to set default kafka configurations.
     {'bootstrap_servers': 'localhost:29091', 'group_id': 'demo', 'security_protocol': 'SASL_SSL', 'sasl_mechanism': 'PLAIN', 'sasl_plain_username': 'myuser', 'sasl_plain_password': 'mypass'}
 
 Yield
------
+^^^^^
 
 When your handler function returns zero or more values, use ``yield`` instead of ``return``.
 
@@ -143,38 +141,8 @@ When your handler function returns zero or more values, use ``yield`` instead of
     even: 2
     even: 4
 
-Timer
------
-
-Async generators can be used to trigger handler functions.
-
-::
-
-    from asyncio import run, sleep
-    from time import strftime
-
-    from slipstream import handle, stream
-
-    async def timer(interval=1.0):
-        while True:
-            yield
-            await sleep(interval)
-
-    @handle(timer())
-    def handler():
-        print(strftime('%H:%M:%S', localtime()))
-
-    run(stream())
-
-::
-
-    23:25:10
-    23:25:11
-    23:25:12
-    ...
-
 Codec
------
+^^^^^
 
 Codecs are used for serializing and deserializing data.
 
@@ -235,75 +203,8 @@ Custom codecs can be created using ``ICodec``:
             reader = DatumReader(self.schema)
             return cast(object, reader.read(decoder))
 
-Endpoint
---------
-
-We can install ``fastapi`` to add API endpoints.
-
-::
-
-    from asyncio import gather, run, sleep
-    from time import strftime
-
-    from fastapi import FastAPI
-    from fastapi.responses import StreamingResponse
-    from uvicorn import Config, Server
-
-    from slipstream import Cache, handle, stream
-
-    app, cache = FastAPI(), Cache('db')
-
-    async def timer(interval=1.0):
-        while True:
-            yield
-            await sleep(interval)
-
-    @handle(timer(), sink=[cache, print])
-    def tick_tock():
-        yield 'time', strftime('%H:%M:%S')
-
-    async def cache_value_updates():
-        async for _, v in cache:
-            yield v + '\n'
-
-    @app.get('/updates')
-    async def updates():
-        return StreamingResponse(
-            cache_value_updates(),
-            media_type='text/event-stream'
-        )
-
-    async def main():
-        config = Config(app=app, host='0.0.0.0', port=8000)
-        server = Server(config)
-        await gather(stream(), server.serve())
-
-    if __name__ == '__main__':
-        run(main())
-
-In this example we're creating a streaming endpoint that emits cache changes:
-
-- An update is emitted only when the cache is called as a function (``cache(key, val)``)
-- The cache can be used as an ``AsyncIterator`` (``async for k, v in cache``)
-- The ``cache_value_updates`` function formats values that have been updated
-- The ``updates`` endpoint returns the emitted updates through a ``StreamingResponse``
-
-When we run the application and call the endpoint, we'll receive the cache value updates:
-
-::
-
-    curl -N http://127.0.0.1:8000/updates
-
-::
-
-    00:16:57
-    00:16:58
-    00:16:59
-    00:17:00
-    ...
-
 Checkpoint
-----------
+^^^^^^^^^^
 
 A ``Checkpoint`` can be used to pulse the heartbeat of dependency streams to handle downtimes.
 

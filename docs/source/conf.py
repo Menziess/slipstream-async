@@ -7,33 +7,44 @@ https://www.sphinx-doc.org/en/master/usage/configuration.html
 -- Project information -----------------------------------------------------
 https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 """
+from time import strftime
 
-
-project = 'slipstream'
-copyright = '2024, Menziess'
+project = 'Slipstream'
+html_title = project
 author = 'Menziess'
+copyright = f'{strftime("%Y")}, {author}'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
+templates_path = ['_templates']
+exclude_patterns = ['*_build', '*Thumbs.db', '*.DS_Store', '*.venv/*']
 extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
+    'sphinx.ext.autosectionlabel',
+    'autoapi.extension',
 ]
 
-templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', '.venv/*']
-autodoc_default_options = {
-    'members': True,
-    'undoc-members': True,
-    'show-inheritance': True,
-}
-autosummary_generate = True
+autosectionlabel_prefix_document = True
+
+autoapi_python_path = 'slipstream'
+autoapi_dirs = ['../../slipstream']
+autoapi_ignore = exclude_patterns
+autoapi_type = 'python'
+autoapi_template_dir = f'{templates_path[0]}/autoapi'
+autoapi_keep_files = True
+autoapi_options = [
+    'members',
+    'undoc-members',
+    'show-inheritance',
+    'show-module-summary',
+    'imported-members',
+]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'furo'
+pygments_style = 'sphinx'

@@ -42,6 +42,13 @@ from slipstream.utils import (
     iscoroutinecallable,
 )
 
+__all__ = [
+    'READ_FROM_START',
+    'READ_FROM_END',
+    'Signal',
+    'PausableStream',
+]
+
 KAFKA_CLASSES_PARAMS: dict[str, Any] = {
     **get_params_names(AIOKafkaConsumer),
     **get_params_names(AIOKafkaProducer),
@@ -64,7 +71,7 @@ class Signal(Enum):
     RESUME = 2
 
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 class PausableStream:
@@ -186,7 +193,7 @@ class Conf(metaclass=Singleton):
         except KeyboardInterrupt:
             pass
         except Exception as e:
-            logger.critical(e)
+            _logger.critical(e)
             raise
         finally:
             await self._shutdown()
@@ -249,7 +256,7 @@ class Topic:
         self,
         name: str,
         conf: dict[str, Any] = {},
-        offset: Optional[int] = None,
+        offset: Optional[int | dict[int, int]] = None,
         codec: Optional[ICodec] = None,
         dry: bool = False,
     ):
@@ -272,7 +279,7 @@ class Topic:
         ] = None
 
         if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
-            logger.warning(
+            _logger.warning(
                 f'Unexpected Topic {self.name} conf entries: {",".join(diff)}')
 
         if (
@@ -315,7 +322,7 @@ class Topic:
             if partitions.issubset(ready_partitions):
                 break
             if i % 100 == 0:
-                logger.info(
+                _logger.info(
                     f'Waiting for partitions {partitions - ready_partitions}')
             await sleep(0.1)
         else:
@@ -391,7 +398,7 @@ class Topic:
             for k, v in headers.items()
         ] if headers else None
         if self.dry:
-            logger.warning(
+            _logger.warning(
                 f'Skipped sending message to {self.name} [dry=True]'
             )
             return
@@ -406,7 +413,7 @@ class Topic:
                 **kwargs
             )
         except Exception as e:
-            logger.error(
+            _logger.error(
                 f'Error raised while producing to Topic {self.name}: '
                 f'{e.args[0] if e.args else ""}'
             )
@@ -440,11 +447,11 @@ class Topic:
 
                     if signal is Signal.PAUSE:
                         consumer.pause(*consumer.assignment())
-                        logger.debug(f'{self.name} paused')
+                        _logger.debug(f'{self.name} paused')
                         while True:
                             signal = yield Signal.SENTINEL
                             if signal is Signal.RESUME:
-                                logger.debug(f'{self.name} reactivated')
+                                _logger.debug(f'{self.name} reactivated')
                                 consumer.resume(*consumer.assignment())
                                 break
 
@@ -453,7 +460,7 @@ class Topic:
                             await sleep(1)
 
             except Exception as e:
-                logger.error(
+                _logger.error(
                     f'Error raised while consuming from Topic {self.name}: '
                     f'{e.args[0] if e.args else ""}'
                 )
@@ -503,12 +510,12 @@ class Topic:
             try:
                 await wait_for(client.stop(), timeout=10)
             except TimeoutError:
-                logger.critical(
+                _logger.critical(
                     f'Client for topic "{self.name}" failed '
                     f'to shut down in time {client}'
                 )
             except Exception as e:
-                logger.critical(
+                _logger.critical(
                     f'Client for topic "{self.name}" failed '
                     f'to shut down gracefully {client}: {e}'
                 )
@@ -537,7 +544,7 @@ async def _sink_output(
 
 def handle(
     *iterable: AsyncIterable[Any],
-    sink: Iterable[AsyncCallable] = []
+    sink: Iterable[Callable | AsyncCallable] = []
 ):
     """Snaps function to stream.
 

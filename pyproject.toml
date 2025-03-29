@@ -43,7 +43,7 @@ test = [
 ]
 docs = [
   "sphinx",
-  "sphinx-rtd-theme",
+  "furo",
   "sphinx-autoapi",
   "sphinx-autobuild",
 ]
