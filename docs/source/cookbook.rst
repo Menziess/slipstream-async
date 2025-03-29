@@ -49,6 +49,37 @@ Adding ``asyncio.sleep`` allows other coroutines to run during the delay.
             await sleep(0.01)
             yield msg
 
+Source
+^^^^^^
+
+Any data source that can be turned into an ``AsyncIterable`` can be used as a source in combination with :py:class:`slipstream.handle`.
+
+**Depends on:** `aiohttp <https://docs.aiohttp.org/en/stable/index.html>`_.
+
+For example, the Wikipedia recent changes streaming API:
+
+::
+
+    from asyncio import run
+
+    from aiohttp import ClientSession
+
+    from slipstream import handle, stream
+
+    URL = 'https://stream.wikimedia.org/v2/stream/recentchange'
+
+    async def read_streaming_api(url):
+        async with ClientSession(raise_for_status=True) as session:
+            async with session.get(url) as r:
+                async for line in r.content:
+                    yield line
+
+    @handle(read_streaming_api(URL), sink=[print])
+    def handler(msg):
+        yield f'Wiki change {msg}!'
+
+    run(stream())
+
 Joins
 ^^^^^
 
