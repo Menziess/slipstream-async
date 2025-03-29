@@ -80,6 +80,46 @@ For example, the Wikipedia recent changes streaming API:
 
     run(stream())
 
+Sink
+^^^^
+
+Any data sink that can be turned into a ``Callable`` can be used in combination with :py:class:`slipstream.handle`.
+
+**Depends on:** `redis <https://redis.io/docs/latest/develop/clients/redis-py>`_.
+
+::
+
+    from asyncio import run
+
+    from redis import Redis
+
+    from slipstream import handle, stream
+
+    async def messages():
+        for _ in range(2):
+            for emoji in '🏆📞🐟👌':
+                yield emoji
+
+    r = Redis(host='localhost', port=6379, charset='utf-8', decode_responses=True)
+
+    def cache(pair: tuple):
+        r.set(*pair)
+
+    @handle(messages(), sink=[cache])
+    def handler(msg):
+        count = int(r.get(msg)) + 1 if msg in r else 1
+        yield msg, count
+
+    run(stream())
+
+    print({k: r[k] for k in r.keys('*')})
+
+::
+
+    {'👌': '2', '🏆': '2', '📞': '2', '🐟': '2'}
+
+Alternatively, :py:class:`slipstream.interfaces.ICache` can be used.
+
 Joins
 ^^^^^
 
