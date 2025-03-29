@@ -170,6 +170,8 @@ Codecs are used for serializing and deserializing data.
 
 Custom codecs can be created using ``ICodec``:
 
+**Depends on:** `avro <https://pypi.org/project/avro/>`_.
+
 ::
 
     from io import BytesIO

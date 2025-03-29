@@ -36,7 +36,11 @@ Async generators can be used to trigger handler functions.
 Endpoint
 ^^^^^^^^
 
-We can install ``fastapi`` to add API endpoints.
+We can add API endpoints using ``fastapi``.
+
+**Depends on:** `fastapi <https://fastapi-tutorial.readthedocs.io>`_.
+
+This streaming endpoint emits cache updates:
 
 ::
 
@@ -79,14 +83,9 @@ We can install ``fastapi`` to add API endpoints.
     if __name__ == '__main__':
         run(main())
 
-In this example we're creating a streaming endpoint that emits cache changes:
-
 - An update is emitted only when the cache is called as a function (``cache(key, val)``)
 - The cache can be used as an ``AsyncIterator`` (``async for k, v in cache``)
-- The ``cache_value_updates`` function formats values that have been updated
 - The ``updates`` endpoint returns the emitted updates through a ``StreamingResponse``
-
-When we run the application and call the endpoint, we'll receive the cache value updates:
 
 ::
 
@@ -99,3 +98,5 @@ When we run the application and call the endpoint, we'll receive the cache value
     00:16:59
     00:17:00
     ...
+
+When we call the endpoint, we'll receive each update to the cache.
