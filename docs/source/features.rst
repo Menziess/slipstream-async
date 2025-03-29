@@ -61,7 +61,10 @@ Cache can be used to persist data.
     phone 📞
     prize 🏆
 
-To prevent race conditions, the ``transaction`` context manager can be used:
+Transaction
+^^^^^^^^^^^
+
+To prevent race conditions, Cache's ``transaction`` context manager can be used:
 
 ::
 
