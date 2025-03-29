@@ -1,7 +1,7 @@
 Cookbook
 ========
 
-TODO
+Slipstream favors user freedom over rigid abstractions, letting you craft framework features in just a few lines.
 
 Timer
 ^^^^^

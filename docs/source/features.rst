@@ -6,7 +6,9 @@ Slipstream missing a feature? Create a `new issue <https://github.com/Menziess/s
 Topic
 ^^^^^
 
-Topic can be used to interact with kafka.
+Topic can be used to interact with :ref:`Kafka <getting_started:Kafka>`.
+
+**Depends on:** :ref:`aiokafka <installation:topic>`.
 
 ::
 
@@ -35,16 +37,12 @@ Topic can be used to interact with kafka.
     trophy 🏆
     fish 🐟
 
-Topic uses `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood, see :doc:`installation <installation>`.
-
 Cache
 ^^^^^
 
 Cache can be used to persist data.
 
-Install ``rocksdict`` separately or along with slipstream (unpinned)::
-
-    pip install slipstream-async[cache]
+**Depends on:** :ref:`rocksdict <installation:cache>`.
 
 ::
 
@@ -62,8 +60,6 @@ Install ``rocksdict`` separately or along with slipstream (unpinned)::
 
     phone 📞
     prize 🏆
-
-Cache is a basic wrapper around `rocksdict <https://rocksdict.github.io/RocksDict/rocksdict.html>`_, see :doc:`installation <installation>`.
 
 To prevent race conditions, the ``transaction`` context manager can be used:
 
@@ -208,10 +204,10 @@ Checkpoint
 
 A ``Checkpoint`` can be used to pulse the heartbeat of dependency streams to handle downtimes.
 
-The easiest way to grasp the concept is by looking at the output of these examples:
+**Example code + output:**
 
-1. `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854>`_
-2. `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b>`_
+1. `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854?permalink_comment_id=5459889#gistcomment-5459889>`_
+2. `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b?permalink_comment_id=5468001#gistcomment-5468001>`_
 
 A checkpoint consists of a dependent stream and dependency streams:
 
