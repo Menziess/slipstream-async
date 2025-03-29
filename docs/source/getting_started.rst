@@ -127,7 +127,7 @@ By adding :ref:`features:cache` we can persist state within our application, mak
 
     run(stream())
 
-Notice that ``cache`` is used as a sink, persisting our yielded key and a value: ``emoji: count``.
+Notice that ``cache`` is used as a sink, persisting our yielded key and value: ``emoji: count``.
 
 The ``counter`` prints out the cache contents every three seconds:
 
@@ -141,6 +141,6 @@ The ``counter`` prints out the cache contents every three seconds:
 
 When using :ref:`features:cache`, the data is automatically persisted to disk, and when the application restarts after a crash, the state is automatically loaded from it.
 
-It's configured to use Fifo compaction style by default, maintaining a window size of roughly 25 MB, but this can be configured.
+It's configured to use `Fifo <https://rocksdict.github.io/RocksDict/rocksdict.html#DBCompactionStyle>`_ compaction style by default, maintaining a window size of roughly 25 MB, but this can be configured.
 
 Read more about Slipstream's :doc:`features <features>`. Or explore the :doc:`cookbook <cookbook>` for more interesting recipes!

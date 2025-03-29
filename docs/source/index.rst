@@ -67,7 +67,7 @@ So that's the data flow model!
 Contents
 ^^^^^^^^
 
-Proceed by interacting with Kafka and caching application state -- :doc:`getting started <getting_started>`.
+Proceed by interacting with Kafka and caching application state in: :doc:`getting started <getting_started>`.
 
 .. toctree::
    :maxdepth: 2
