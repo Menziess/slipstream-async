@@ -37,7 +37,7 @@ Spin up a local Kafka broker using `docker-compose.yml <https://github.com/Menzi
 
     docker compose up broker -d
 
-Run the customized hello-world snippet, using :ref:`features:topic`:
+By adding a :ref:`features:topic` we can simultaneously send data to Kafka using the ``produce`` handler, and receive data using the ``consume`` handler:
 
 ::
 
@@ -48,6 +48,7 @@ Run the customized hello-world snippet, using :ref:`features:topic`:
     topic = Topic('emoji', {
         'bootstrap_servers': 'localhost:29091',
         'group_instance_id': 'demo',
+        'auto_offset_reset': 'earliest',
         'group_id': 'demo',
     })
 
@@ -76,12 +77,12 @@ Run the customized hello-world snippet, using :ref:`features:topic`:
     received: emoji 👌
     ...
 
-Next up, we'll aggregate the data and do something useful with these emoji's.
+Now if we would like to aggregate these emoji's, we'd need some way to keep track of the results.
 
 Persistence
 ^^^^^^^^^^^
 
-By adding :ref:`features:cache` we can persist state within our application:
+By adding :ref:`features:cache` we can persist state within our application, making it resilient to crashes and allowing cross-stream stateful operations:
 
 ::
 
@@ -92,6 +93,7 @@ By adding :ref:`features:cache` we can persist state within our application:
     topic = Topic('emoji', {
         'bootstrap_servers': 'localhost:29091',
         'group_instance_id': 'demo',
+        'auto_offset_reset': 'earliest',
         'group_id': 'demo',
     })
     cache = Cache('state/emoji')
@@ -125,7 +127,9 @@ By adding :ref:`features:cache` we can persist state within our application:
 
     run(stream())
 
-Outputting the count every three seconds:
+Notice that ``cache`` is used as a sink, persisting our yielded key and a value: ``emoji: count``.
+
+The ``counter`` prints out the cache contents every three seconds:
 
 ::
 
@@ -135,4 +139,8 @@ Outputting the count every three seconds:
     ...
     emoji counts: {'emoji 🏆': 4, 'emoji 🐟': 2, 'emoji 👌': 3, 'emoji 📞': 3}
 
-If our application crashes and restarts, it automatically loads the last state from the cache.
+When using :ref:`features:cache`, the data is automatically persisted to disk, and when the application restarts after a crash, the state is automatically loaded from it.
+
+It's configured to use Fifo compaction style by default, maintaining a window size of roughly 25 MB, but this can be configured.
+
+Read more about Slipstream's :doc:`features <features>`. Or explore the :doc:`cookbook <cookbook>` for more interesting recipes!

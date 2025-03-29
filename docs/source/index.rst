@@ -67,7 +67,7 @@ So that's the data flow model!
 Contents
 ^^^^^^^^
 
-Explore the :doc:`cookbook <cookbook>` for more recipes! Or read through Slipstream's list of :doc:`features <features>` next.
+Proceed by interacting with Kafka and caching application state -- :doc:`getting started <getting_started>`.
 
 .. toctree::
    :maxdepth: 2
