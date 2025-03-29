@@ -33,6 +33,22 @@ Async generators can be used to trigger handler functions.
     23:25:12
     ...
 
+Iterable
+^^^^^^^^
+
+Regular non-async ``Iterables`` don't support parallelism.
+
+Adding ``asyncio.sleep`` allows other coroutines to run during the delay.
+
+::
+
+    from asyncio import sleep
+
+    async def async_iterable(it):
+        for msg in it:
+            yield msg
+            await sleep(0.01)
+
 Endpoint
 ^^^^^^^^
 
