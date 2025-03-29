@@ -28,8 +28,8 @@ For instance, while timers aren't included, you can whip one up effortlessly:
 
     async def timer(interval=1.0):
         while True:
-            yield
             await sleep(interval)
+            yield
 
 We'll use ``print`` as our sink:
 

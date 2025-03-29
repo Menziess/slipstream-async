@@ -100,8 +100,8 @@ By adding :ref:`features:cache` we can persist state within our application, mak
 
     async def timer(interval=1.0):
         while True:
-            yield
             await sleep(interval)
+            yield
 
     async def messages():
         while True:
