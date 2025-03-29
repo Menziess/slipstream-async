@@ -139,7 +139,7 @@ The ``counter`` prints out the cache contents every three seconds:
     ...
     emoji counts: {'emoji 🏆': 4, 'emoji 🐟': 2, 'emoji 👌': 3, 'emoji 📞': 3}
 
-When using :ref:`features:cache`, the data is automatically persisted to disk, and when the application restarts after a crash, the state is automatically loaded from it.
+When using :ref:`features:cache`, the data is automatically persisted to disk, and when the application restarts after a crash, the state is loaded from it.
 
 It's set to use `Fifo <https://rocksdict.github.io/RocksDict/rocksdict.html#DBCompactionStyle>`_ compaction style by default, maintaining a window size of roughly 25 MB, but this can be configured.
 

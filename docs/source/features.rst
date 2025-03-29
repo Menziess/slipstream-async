@@ -61,6 +61,10 @@ Cache can be used to persist data.
     phone 📞
     prize 🏆
 
+Data is persisted to disk and automatically loaded upon restart, adding to application resilience.
+
+It's set to use `Fifo <https://rocksdict.github.io/RocksDict/rocksdict.html#DBCompactionStyle>`_ compaction style by default, maintaining a window size of roughly 25 MB, this can be configured by passing `options <autoapi/slipstream/caching/index.html#slipstream.caching.Cache>`_.
+
 Transaction
 ^^^^^^^^^^^
 
