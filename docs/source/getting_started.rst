@@ -77,7 +77,7 @@ By adding a :ref:`features:topic` we can simultaneously send data to Kafka using
     received: 👌
     ...
 
-In ``producer`` we're yielding key (``None``) and a value to the topic.
+If ``Topic`` is used as a sink, it requires a key and value: ``None: emoji``.
 
 Now if we would like to aggregate these emoji's, we'd need some way to keep track of the results.
 
@@ -129,7 +129,7 @@ By adding :ref:`features:cache` we can persist state within our application, mak
 
     run(stream())
 
-Notice that ``cache`` is used as a sink, persisting our yielded key and value: ``emoji: count``.
+``Cache`` persists our yielded key and value: ``emoji: count``.
 
 The ``counter`` prints out the cache contents every three seconds:
 

@@ -231,6 +231,8 @@ For production-readiness, you’d add:
 - **Watermarks:** to determine when a window is "complete" despite late events
 - **Late event handling:** drop, reassign, or buffer late events
 
+To handle late data or stream downtimes, see :ref:`cookbook:synchronization`.
+
 Joins
 ^^^^^
 
@@ -298,10 +300,12 @@ This type of join is often called a temporal-join, nearby-join, or merge-as-of:
 This approach works when the ``weather`` updates are guaranteed to be received in time.
 If the ``weather`` stream goes down, the ``activity`` stream will be enriched with stale data.
 
+To manage late data, see synchronization 👇
+
 Synchronization
 ^^^^^^^^^^^^^^^
 
-Using :ref:`features:checkpoint` we can detect and act on stream downtimes, pausing the dependent stream, and possibly send out corrections.
+Using :ref:`features:checkpoint` we can detect and act on stream downtimes, pausing the dependent stream, and optionally send out corrections.
 
 ::
 
@@ -457,6 +461,10 @@ Breakdown:
 - When the ``weather_stream`` recovered, the user defined ``recovery_callback`` was called.
 - The callback seeks the ``activity`` topic back to the offset before the ``weather_stream`` went down, causing the activity events that were sent out with stale data to be reprocessed
 - The faulty enrichment was corrected: ``The weather during shopping was 🌦️``
+
+Notice that when sending out corrections is required (using :py:class:`slipstream.Topic.seek` for example), data flows through the handler function again.
+This must be handled appropriately when dealing with stateful aggregations (prevent counting/summing an event twice).
+All consumers of the data must also be capable of dealing with corrections, by compacting/deduplicating the data by some key.
 
 Endpoint
 ^^^^^^^^
