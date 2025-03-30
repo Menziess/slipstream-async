@@ -52,7 +52,7 @@ Adding ``asyncio.sleep`` allows other coroutines to run during the delay.
 Source
 ^^^^^^
 
-Any data source that can be turned into an ``AsyncIterable`` can be used as a source in combination with :py:class:`slipstream.handle`.
+As long as a data source can be turned into an ``AsyncIterable``, it can be used in :py:class:`slipstream.handle`.
 
 **Depends on:** `aiohttp <https://docs.aiohttp.org/en/stable/index.html>`_.
 
@@ -180,7 +180,8 @@ Using the messages below, we'll use a temporal-join to find the ``weather`` at t
         {'timestamp': dt(2023, 1, 1, 13, 10), 'value': 'lunch'},  # 🌧
     ])
 
-By caching the ``weather`` updates using their (POSIX) event-time as a key, we can find the nearest timestamp value (a temporal-join / nearby-join / merge-as-of):
+By caching the ``weather`` updates using their (POSIX) event-time as a key, we can find the nearest timestamp value.
+This type of join is often called a temporal-join, nearby-join, or merge-as-of:
 
 ::
 
