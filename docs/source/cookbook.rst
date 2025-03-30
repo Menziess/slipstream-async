@@ -194,6 +194,8 @@ Fixed-size window sliding with each event:
 
 ::
 
+    from collections import Counter
+
     window_size_seconds = 3.0
 
     @handle(messages(), sink=[print])
