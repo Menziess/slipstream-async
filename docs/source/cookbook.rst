@@ -1,7 +1,7 @@
 Cookbook
 ========
 
-Slipstream favors user freedom over rigid abstractions, letting you craft framework features in just a few lines.
+Slipstream favors user freedom over rigid abstractions, letting you craft framework features in just a few lines. Share `your artistry <https://github.com/Menziess/slipstream-async/discussions/categories/show-and-tell>`_!
 
 Timer
 ^^^^^
@@ -155,6 +155,81 @@ Custom codecs can be created using :py:class:`slipstream.interfaces.ICodec`:
             decoder = BinaryDecoder(bytes_reader)
             reader = DatumReader(self.schema)
             return cast(object, reader.read(decoder))
+
+Aggregations
+^^^^^^^^^^^^
+
+Streaming aggregations typically don't rely on the whole data's history but are either:
+
+- **Fold or reduce operations:** incremental updates to a state like count or sum over all data, like the code snippet in :ref:`Getting Started <getting_started:persistence>`
+- **Window operations:** applying these on data within a window of time (event- or wall-time based)
+
+Here are some of the well-known window types:
+
+- **Tumbling:** fixed-size, non-overlapping, on fixed time interval
+- **Hopping:** fixed-size, overlapping, on fixed time interval
+- **Sliding:** fixed-size, overlapping, on content of window change
+- **Session:** dynamic-size, overlapping, on some condition being met
+
+Let's look at the Sliding window using these emoji's, having timestamps in seconds:
+
+::
+
+    from asyncio import run, sleep
+
+    from slipstream import Cache, handle, stream
+
+    cache = Cache('state/emoji')
+
+    async def messages():
+        events = [
+            ('🏆', 0.0), ('📞', 0.5), ('🐟', 1.0), ('👌', 2.0),
+            ('🏆', 3.5), ('📞', 4.0), ('🐟', 5.0), ('👌', 5.5)
+        ]
+        for emoji, ts in events:
+            await sleep(0.1)
+            yield emoji, ts
+
+Fixed-size window sliding with each event:
+
+::
+
+    window_size_seconds = 3.0
+
+    @handle(messages(), sink=[print])
+    async def sliding_handler(event):
+        _, event_time = event
+
+        events = cache.get('sliding_events', [])
+        events.append(event)
+
+        # Keep events within window_size_seconds of current event_time
+        events = [
+            (e, t) for e, t in events
+            if event_time - t <= window_size_seconds
+        ]
+        cache.put('sliding_events', events)
+
+        counts = Counter(emoji for emoji, _ in events)
+        return f'Sliding window ending at {event_time}: {dict(counts)}'
+
+    run(stream())
+
+::
+
+    Sliding window ending at 0.0: {'🏆': 1}
+    Sliding window ending at 0.5: {'🏆': 1, '📞': 1}
+    Sliding window ending at 1.0: {'🏆': 1, '📞': 1, '🐟': 1}
+    Sliding window ending at 2.0: {'🏆': 1, '📞': 1, '🐟': 1, '👌': 1}
+    Sliding window ending at 3.5: {'📞': 1, '🐟': 1, '👌': 1, '🏆': 1}
+    Sliding window ending at 4.0: {'🐟': 1, '👌': 1, '🏆': 1, '📞': 1}
+    Sliding window ending at 5.0: {'👌': 1, '🏆': 1, '📞': 1, '🐟': 1}
+    Sliding window ending at 5.5: {'🏆': 1, '📞': 1, '🐟': 1, '👌': 1}
+
+For production-readiness, you’d add:
+
+- **Watermarks:** to determine when a window is "complete" despite late events
+- **Late event handling:** drop, reassign, or buffer late events
 
 Joins
 ^^^^^
