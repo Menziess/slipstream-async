@@ -175,38 +175,7 @@ Codecs are used for serializing and deserializing data.
 
     {'msg': '🐟'}
 
-Custom codecs can be created using ``ICodec``:
-
-**Depends on:** `avro <https://pypi.org/project/avro/>`_.
-
-::
-
-    from io import BytesIO
-
-    from avro.io import BinaryDecoder, BinaryEncoder, DatumReader, DatumWriter
-    from avro.schema import Schema, parse
-
-    from slipstream.codecs import ICodec
-
-    class AvroCodec(ICodec):
-        """Serializes/deserializes avro messages using schema."""
-
-        def __init__(self, path: str):
-            with open(path) as a:
-                self.schema = parse(a.read())
-
-        def encode(self, obj: Any) -> bytes:
-            writer = DatumWriter(self.schema)
-            bytes_writer = BytesIO()
-            encoder = BinaryEncoder(bytes_writer)
-            writer.write(obj, encoder)
-            return cast(bytes, bytes_writer.getvalue())
-
-        def decode(self, s: bytes) -> object:
-            bytes_reader = BytesIO(s)
-            decoder = BinaryDecoder(bytes_reader)
-            reader = DatumReader(self.schema)
-            return cast(object, reader.read(decoder))
+You can define your own codecs using :py:class:`slipstream.interfaces.ICodec`, see :ref:`cookbook:AvroCodec` as an example.
 
 Checkpoint
 ^^^^^^^^^^
