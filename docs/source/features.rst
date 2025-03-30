@@ -249,7 +249,7 @@ Checkpoints automatically handle pausing of dependent streams when they are boun
         c.check_pulse(marker=msg['event_timestamp'], offset=offset)
         yield key, msg
 
-On the first pulse check, no message might have been received from `dependency` yet.
+On the first pulse check, no message might have been received from ``dependency`` yet.
 Therefore the dependency checkpoint is updated with the initial state and marker of the dependent stream:
 
 ::
@@ -263,7 +263,7 @@ Therefore the dependency checkpoint is updated with the initial state and marker
 
     datetime.datetime(2025, 1, 1, 10, 0)
 
-When a message is received in `dependency`, send a heartbeat with its event time, which can be compared with the dependent event times to check for downtime:
+When a message is received in ``dependency``, send a heartbeat with its event time, which can be compared with the dependent event times to check for downtime:
 
 ::
 

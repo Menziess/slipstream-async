@@ -112,11 +112,11 @@ Any data sink that can be turned into a ``Callable`` can be used in combination 
 
     run(stream())
 
-    print({k: r[k] for k in r.keys('*')})
+    print({k: int(r[k]) for k in r.keys('*')})
 
 ::
 
-    {'👌': '2', '🏆': '2', '📞': '2', '🐟': '2'}
+    {'👌': 2, '🏆': 2, '📞': 2, '🐟': 2}
 
 Alternatively, :py:class:`slipstream.interfaces.ICache` can be used.
 
