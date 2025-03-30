@@ -145,10 +145,12 @@ class Conf(metaclass=Singleton):
     ...     yield f'Hello {msg}!'
 
     Set application kafka configuration (optional):
+
     >>> Conf({'bootstrap_servers': 'localhost:29091'})
     {'bootstrap_servers': 'localhost:29091'}
 
     Provide exit hooks:
+
     >>> async def exit_hook():
     ...     print('Shutting down application.')
 

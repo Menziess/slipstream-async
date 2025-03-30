@@ -6,7 +6,9 @@ Slipstream missing a feature? Create a `new issue <https://github.com/Menziess/s
 Topic
 ^^^^^
 
-Topic can be used to interact with kafka.
+Topic can be used to interact with :ref:`Kafka <getting_started:Kafka>`.
+
+**Depends on:** :ref:`aiokafka <installation:topic>`.
 
 ::
 
@@ -35,16 +37,12 @@ Topic can be used to interact with kafka.
     trophy 🏆
     fish 🐟
 
-Topic uses `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood, see :doc:`installation <installation>`.
-
 Cache
 ^^^^^
 
 Cache can be used to persist data.
 
-Install ``rocksdict`` separately or along with slipstream (unpinned)::
-
-    pip install slipstream-async[cache]
+**Depends on:** :ref:`rocksdict <installation:cache>`.
 
 ::
 
@@ -63,9 +61,14 @@ Install ``rocksdict`` separately or along with slipstream (unpinned)::
     phone 📞
     prize 🏆
 
-Cache is a basic wrapper around `rocksdict <https://rocksdict.github.io/RocksDict/rocksdict.html>`_, see :doc:`installation <installation>`.
+Data is persisted to disk and automatically loaded upon restart, adding to application resilience.
 
-To prevent race conditions, the ``transaction`` context manager can be used:
+By default, it will retain a window size of 25 MB using `Fifo <https://rocksdict.github.io/RocksDict/rocksdict.html#DBCompactionStyle>`_ compaction, this can be configured by passing ``options`` in :py:class:`slipstream.caching.Cache`.
+
+Transaction
+^^^^^^^^^^^
+
+To prevent race conditions, Cache's ``transaction`` context manager can be used:
 
 ::
 
@@ -172,46 +175,17 @@ Codecs are used for serializing and deserializing data.
 
     {'msg': '🐟'}
 
-Custom codecs can be created using ``ICodec``:
-
-::
-
-    from io import BytesIO
-
-    from avro.io import BinaryDecoder, BinaryEncoder, DatumReader, DatumWriter
-    from avro.schema import Schema, parse
-
-    from slipstream.codecs import ICodec
-
-    class AvroCodec(ICodec):
-        """Serializes/deserializes avro messages using schema."""
-
-        def __init__(self, path: str):
-            with open(path) as a:
-                self.schema = parse(a.read())
-
-        def encode(self, obj: Any) -> bytes:
-            writer = DatumWriter(self.schema)
-            bytes_writer = BytesIO()
-            encoder = BinaryEncoder(bytes_writer)
-            writer.write(obj, encoder)
-            return cast(bytes, bytes_writer.getvalue())
-
-        def decode(self, s: bytes) -> object:
-            bytes_reader = BytesIO(s)
-            decoder = BinaryDecoder(bytes_reader)
-            reader = DatumReader(self.schema)
-            return cast(object, reader.read(decoder))
+You can define your own codecs using :py:class:`slipstream.interfaces.ICodec`, see :ref:`cookbook:AvroCodec` as an example.
 
 Checkpoint
 ^^^^^^^^^^
 
 A ``Checkpoint`` can be used to pulse the heartbeat of dependency streams to handle downtimes.
 
-The easiest way to grasp the concept is by looking at the output of these examples:
+**Example code + output:**
 
-1. `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854>`_
-2. `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b>`_
+1. `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854?permalink_comment_id=5459889#gistcomment-5459889>`_
+2. `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b?permalink_comment_id=5468001#gistcomment-5468001>`_
 
 A checkpoint consists of a dependent stream and dependency streams:
 
@@ -244,7 +218,7 @@ Checkpoints automatically handle pausing of dependent streams when they are boun
         c.check_pulse(marker=msg['event_timestamp'], offset=offset)
         yield key, msg
 
-On the first pulse check, no message might have been received from `dependency` yet.
+On the first pulse check, no message might have been received from ``dependency`` yet.
 Therefore the dependency checkpoint is updated with the initial state and marker of the dependent stream:
 
 ::
@@ -258,7 +232,7 @@ Therefore the dependency checkpoint is updated with the initial state and marker
 
     datetime.datetime(2025, 1, 1, 10, 0)
 
-When a message is received in `dependency`, send a heartbeat with its event time, which can be compared with the dependent event times to check for downtime:
+When a message is received in ``dependency``, send a heartbeat with its event time, which can be compared with the dependent event times to check for downtime:
 
 ::
 

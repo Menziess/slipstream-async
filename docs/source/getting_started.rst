@@ -14,8 +14,8 @@ Slipstream's hello-world app would look something like this:
             yield emoji
 
     @handle(messages(), sink=[print])
-    def handler(msg):
-        yield f'Hello {msg}!'
+    def handler(emoji):
+        yield f'Hello {emoji}!'
 
     run(stream())
 
@@ -58,9 +58,9 @@ By adding a :ref:`features:topic` we can simultaneously send data to Kafka using
                 yield emoji
 
     @handle(messages(), sink=[topic])
-    async def producer(msg):
+    async def producer(emoji):
         await sleep(.5)
-        yield None, f'emoji {msg}'
+        yield None, emoji
 
     @handle(topic, sink=[print])
     def consumer(msg):
@@ -71,11 +71,13 @@ By adding a :ref:`features:topic` we can simultaneously send data to Kafka using
 
 ::
 
-    received: emoji 🏆
-    received: emoji 📞
-    received: emoji 🐟
-    received: emoji 👌
+    received: 🏆
+    received: 📞
+    received: 🐟
+    received: 👌
     ...
+
+If ``Topic`` is used as a sink, it requires a key and value: ``None: emoji``.
 
 Now if we would like to aggregate these emoji's, we'd need some way to keep track of the results.
 
@@ -100,8 +102,8 @@ By adding :ref:`features:cache` we can persist state within our application, mak
 
     async def timer(interval=1.0):
         while True:
-            yield
             await sleep(interval)
+            yield
 
     async def messages():
         while True:
@@ -109,9 +111,9 @@ By adding :ref:`features:cache` we can persist state within our application, mak
                 yield emoji
 
     @handle(messages(), sink=[topic])
-    async def producer(msg):
+    async def producer(emoji):
         await sleep(.5)
-        yield None, f'emoji {msg}'
+        yield None, emoji
 
     @handle(topic, sink=[cache])
     def consumer(msg):
@@ -127,20 +129,18 @@ By adding :ref:`features:cache` we can persist state within our application, mak
 
     run(stream())
 
-Notice that ``cache`` is used as a sink, persisting our yielded key and value: ``emoji: count``.
+``Cache`` persists our yielded key and value: ``emoji: count``.
 
 The ``counter`` prints out the cache contents every three seconds:
 
 ::
 
     emoji counts: {}
-    received: emoji 👌
-    received: emoji 🏆
+    received: 👌
+    received: 🏆
     ...
-    emoji counts: {'emoji 🏆': 4, 'emoji 🐟': 2, 'emoji 👌': 3, 'emoji 📞': 3}
+    emoji counts: {'🏆': 4, '🐟': 2, '👌': 3, '📞': 3}
 
-When using :ref:`features:cache`, the data is automatically persisted to disk, and when the application restarts after a crash, the state is automatically loaded from it.
-
-It's configured to use `Fifo <https://rocksdict.github.io/RocksDict/rocksdict.html#DBCompactionStyle>`_ compaction style by default, maintaining a window size of roughly 25 MB, but this can be configured.
+When using :ref:`features:cache`, the data is automatically persisted to disk, and when the application restarts after a crash, the state is loaded from it.
 
 Read more about Slipstream's :doc:`features <features>`. Or explore the :doc:`cookbook <cookbook>` for more interesting recipes!

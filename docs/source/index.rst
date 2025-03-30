@@ -28,8 +28,8 @@ For instance, while timers aren't included, you can whip one up effortlessly:
 
     async def timer(interval=1.0):
         while True:
-            yield
             await sleep(interval)
+            yield
 
 We'll use ``print`` as our sink:
 
@@ -37,7 +37,7 @@ We'll use ``print`` as our sink:
 
     print
 
-Let's send our mascot 🐟 "blub" downstream on a regular 1 second interval:
+Let's send our mascot 🐟 *-- blub* downstream on a regular 1 second interval:
 
 ::
 
@@ -62,7 +62,7 @@ Some things that stand out:
 - We yielded ``🐟 - blub``, which is sent to all the ``Callable`` sinks (just ``print`` in this case)
 - Running :py:class:`slipstream.stream` starts the flow from sources via handlers into the sinks
 
-So that's the data flow model!
+The data-flow model that simplifies development of stateful streaming applications!
 
 Contents
 ^^^^^^^^

@@ -18,7 +18,7 @@ Some :doc:`features <features>` require extra dependencies that are not installe
 Topic
 -----
 
-:ref:`features:Topic` is the default kafka client, using `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood.
+:ref:`features:Topic` is the default Kafka client, using `aiokafka <https://aiokafka.readthedocs.io/en/stable/index.html>`_ under the hood.
 
 .. code-block:: c
 
