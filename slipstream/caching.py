@@ -160,7 +160,16 @@ if rocksdict_available:
 
         @asynccontextmanager
         async def transaction(self, key: Key):
-            """Lock the db entry while using the context manager."""
+            """Lock the db entry while using the context manager.
+
+            >>> with cache.transaction('fish'):    # doctest: +SKIP
+            ...     cache['fish'] = '🐟'
+
+            - This works for asynchronous code (not multi-threading/processing)
+            - While locked, other transactions on the same key will block
+            - Actions outside of transaction blocks ignore ongoing transactions
+            - Reads aren't limited by ongoing transactions
+            """
             async with self._get_lock(key):
                 yield self
 
