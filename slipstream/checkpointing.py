@@ -26,6 +26,9 @@ CHECKPOINTS_NAME = 'checkpoints'
 class Dependency:
     """Track the dependent stream state to recover from downtime.
 
+    The dependency name should not be changed once created,
+    it is used to persist the dependency in the cache.
+
     >>> async def emoji():
     ...     for emoji in '🏆📞🐟👌':
     ...         yield emoji
@@ -137,6 +140,9 @@ class Checkpoint:
     ...         yield emoji
 
     >>> dependent, dependency = emoji(), emoji()
+
+    The checkpoint and dependency names should not be changed once created,
+    they are used to persist the checkpoint in the cache.
 
     >>> c = Checkpoint(
     ...     'dependent', dependent=dependent,
