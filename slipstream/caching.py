@@ -162,7 +162,7 @@ if rocksdict_available:
         async def transaction(self, key: Key):
             """Lock the db entry while using the context manager.
 
-            >>> with cache.transaction('fish'):    # doctest: +SKIP
+            >>> async with cache.transaction('fish'):    # doctest: +SKIP
             ...     cache['fish'] = '🐟'
 
             - This works for asynchronous code (not multi-threading/processing)

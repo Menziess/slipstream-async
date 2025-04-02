@@ -72,7 +72,7 @@ To prevent race conditions, Cache's ``transaction`` context manager can be used:
 
 ::
 
-    with cache.transaction('fish'):
+    async with cache.transaction('fish'):
         cache['fish'] = '🐟'
 
 - This only works for asynchronous code (not for multithreading or multiprocessing code)
@@ -180,14 +180,12 @@ You can define your own codecs using :py:class:`slipstream.interfaces.ICodec`, s
 Checkpoint
 ^^^^^^^^^^
 
-A ``Checkpoint`` can be used to pulse the heartbeat of dependency streams to handle downtimes.
+Checkpoints can be used to detect late data:
 
-**Example code + output:**
+1. Example - `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854?permalink_comment_id=5459889#gistcomment-5459889>`_
+2. Example - `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b?permalink_comment_id=5468001#gistcomment-5468001>`_
 
-1. `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854?permalink_comment_id=5459889#gistcomment-5459889>`_
-2. `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b?permalink_comment_id=5468001#gistcomment-5468001>`_
-
-A checkpoint consists of a dependent stream and dependency streams:
+A checkpoint consists of one dependent, and many dependency streams:
 
 ::
 
@@ -197,55 +195,53 @@ A checkpoint consists of a dependent stream and dependency streams:
 
     dependent, dependency = emoji(), emoji()
 
+    # Cache for persisting one or more Checkpoints
+    checkpoints_cache = Cache('state/checkpoints', target_table_size=1024)
+
     c = Checkpoint(
         'dependent', dependent=dependent,
-        dependencies=[Dependency('dependency', dependency)]
+        dependencies=[Dependency('dependency', dependency)],
+        cache=checkpoints_cache
     )
 
-Checkpoints automatically handle pausing of dependent streams when they are bound to user handler functions (using ``handle``):
+By default ``datetimes`` are compared to detect late data (preferably event times).
+While using ``handle``, the dependent stream will automatically be paused when any dependency streams are down or fall behind 10 minutes.
+This can be configured in :py:class:`slipstream.checkpointing.Dependency`. The pausing behavior can be disabled in :py:class:`slipstream.checkpointing.Checkpoint`.
 
 ::
 
     @handle(dependency)
     async def dependency_handler(msg):
-        key, val = msg.key, msg.value
-        await c.heartbeat(val['event_timestamp'])
-        yield key, val
+        await c.heartbeat(msg.value['event_timestamp'])
+        yield msg.key, msg.value
 
     @handle(dependent)
     async def dependent_handler(msg):
-        key, val, offset = msg.key, msg.value, msg.offset
-        c.check_pulse(marker=msg['event_timestamp'], offset=offset)
-        yield key, msg
+        await c.check_pulse(marker=msg.value['event_timestamp'])
+        yield msg.key, msg.value
 
-On the first pulse check, no message might have been received from ``dependency`` yet.
-Therefore the dependency checkpoint is updated with the initial state and marker of the dependent stream:
+When the dependency stream recovers, it might have to process a backlog of messages. So the dependent stream will remain paused until the dependency stream has caught up.
 
-::
-
-    from asyncio import run
-
-    run(c.check_pulse(marker=datetime(2025, 1, 1, 10), offset=8))
-    c['dependency'].checkpoint_marker
+Heartbeat returns latency info which can be used to handle late data differently (e.g. buffer or drop):
 
 ::
 
-    datetime.datetime(2025, 1, 1, 10, 0)
+    latency = await c.heartbeat(msg.value['event_timestamp'])
+    latency
+    .. {
+    ..     'is_late': True,
+    ..     'dependent_marker': datetime(2025, 1, 1, 10),
+    ..     'dependency_marker': datetime(2025, 1, 1, 9),
+    .. }
 
-When a message is received in ``dependency``, send a heartbeat with its event time, which can be compared with the dependent event times to check for downtime:
+Check pulse returns whatever the ``downtime_check`` of the dependency returns. By default it's a ``timedelta`` object.
 
-::
-
-    run(c.heartbeat(datetime(2025, 1, 1, 10, 30)))
-
-When the pulse is checked after a while, it's apparent that no
-dependency messages have been received for 30 minutes:
-
-::
-
-    run(c.check_pulse(marker=datetime(2025, 1, 1, 11), offset=9))
+It also takes arbitrary additional state (kwargs), which can be utilized to reprocess data.
+In the example above "Downtime reprocessing", the offset was stored per partition, allowing to seek back to the time at which the dependency went down.
 
 ::
 
-    datetime.timedelta(seconds=1800)
-
+    if downtime := await checkpoint.check_pulse(ts, **{
+        str(partition): offset
+    }):
+        print(f'Downtime detected: {downtime}')
