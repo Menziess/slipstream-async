@@ -157,17 +157,29 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
         {str(id(checkpoint.dependent)): mock_iterable}
     )
 
+    # If no dependency data has ever come in yet, use the first
+    # pulse as a checkpoint_marker
     await checkpoint.check_pulse(datetime(2025, 1, 1, 10), offset=0)
     await checkpoint.check_pulse(datetime(2025, 1, 1, 11), offset=1)
+
+    # Even though no dependency data has come in yet, it's already
+    # marked as down using the fact that the dependent stream has
+    # processed one hour of data
     assert checkpoint['dependency'].is_down is True
+
+    # When data does come in, and it's late (or still catching up)
+    # we can observe this in the latency info
+    latency_info = await checkpoint.heartbeat(datetime(2025, 1, 1, 10, 30))
+    assert latency_info.get('is_late') is True
 
     conf_mock = mocker.patch('slipstream.Conf', autospec=True)
     conf_mock.return_value.iterables = {
         str(id(checkpoint.dependent)): mocker.MagicMock()
     }
 
-    # Recover dependency stream
-    await checkpoint.heartbeat(datetime(2025, 1, 1, 11, 1))
+    # Latency info shows that the dependency stream has caught up
+    latency_info = await checkpoint.heartbeat(datetime(2025, 1, 1, 11, 1))
+    assert latency_info.get('is_late') is False
 
     # Recovery observed, dependent resumed
     assert checkpoint['dependency'].is_down is False

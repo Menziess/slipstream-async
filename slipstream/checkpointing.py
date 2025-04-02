@@ -176,6 +176,7 @@ class Checkpoint:
     dependent event times to check for downtime:
 
     >>> run(c.heartbeat(datetime(2025, 1, 1, 10, 30)))
+    {'is_late': False, ...}
 
     When the pulse is checked after a while, it's apparent that no
     dependency messages have been received for 30 minutes:
@@ -187,6 +188,16 @@ class Checkpoint:
     the dependent stream will be paused (and resumed when the
     recovery check succeeds). Callbacks can be provided for
     additional custom behavior.
+
+    As the dependency stream recovers, it has to "catch up" with the
+    the dependent stream first. Until then, the dependent stream
+    stays paused, and the dependency stream is marked as down.
+
+    >>> run(c.heartbeat(datetime(2025, 1, 1, 10, 45)))
+    {'is_late': True, ...}
+
+    >>> run(c.heartbeat(datetime(2025, 1, 1, 11, 1)))
+    {'is_late': False, ...}
 
     If no cache is provided, the checkpoint lifespan will be limited
     to that of the application runtime.
@@ -232,7 +243,7 @@ class Checkpoint:
         self,
         marker: datetime | Any,
         dependency_name: Optional[str] = None,
-    ) -> None:
+    ) -> dict:
         """Update checkpoint to latest state.
 
         Args:
@@ -257,8 +268,6 @@ class Checkpoint:
         if dependency.is_down:
             if dependency._recovery_check(self, dependency):
                 dependency.is_down = False
-            else:
-                return
 
             if not any(_.is_down for _ in self.dependencies.values()):
                 _logger.debug(
@@ -271,6 +280,12 @@ class Checkpoint:
                         await self._recovery_callback(self, dependency)
                     else:
                         self._recovery_callback(self, dependency)
+
+        return {
+            'is_late': dependency.is_down,
+            'dependent_marker': self.state_marker,
+            'dependency_marker': dependency.checkpoint_marker,
+        }
 
     async def check_pulse(
         self,
