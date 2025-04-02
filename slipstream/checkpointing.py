@@ -156,15 +156,13 @@ class Checkpoint:
 
     >>> @handle(dependent)
     ... async def dependent_handler(msg):
-    ...     key, val, offset = msg.key, msg.value, msg.offset
-    ...     await c.check_pulse(marker=msg['event_timestamp'], offset=offset)
-    ...     yield key, msg
+    ...     await c.check_pulse(marker=msg.value['event_timestamp'])
+    ...     yield msg.key, msg.value
 
     >>> @handle(dependency)
     ... async def dependency_handler(msg):
-    ...     key, val = msg.key, msg.value
-    ...     await c.heartbeat(val['event_timestamp'])
-    ...     yield key, val
+    ...     await c.heartbeat(msg.value['event_timestamp'])
+    ...     yield msg.key, msg.value
 
     On the first pulse check, no message might have been received
     from `dependency` yet. Therefore the dependency checkpoint is
