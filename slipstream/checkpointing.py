@@ -220,6 +220,7 @@ class Checkpoint:
             'Checkpoint', Dependency], Any]] = None,
         cache: Optional[ICache] = None,
         cache_key_prefix: str = '_',
+        pause_dependent: bool = True
     ):
         """Create instance that tracks downtime of dependency streams."""
         self.name = name
@@ -228,6 +229,7 @@ class Checkpoint:
             dependency.name: dependency
             for dependency in dependencies
         }
+        self.pause_dependent = pause_dependent
         self._cache = cache
         self._cache_key = f'{cache_key_prefix}_{name}_'
         self._downtime_callback = downtime_callback
@@ -279,7 +281,7 @@ class Checkpoint:
                 _logger.debug(
                     f'Dependency "{dependency.name}" downtime resolved')
                 key, c = str(id(self.dependent)), Conf()
-                if key in c.iterables:
+                if self.pause_dependent and key in c.iterables:
                     c.iterables[key].send_signal(Signal.RESUME)
                 if self._recovery_callback:
                     if iscoroutinecallable(self._recovery_callback):
@@ -332,7 +334,7 @@ class Checkpoint:
                 _logger.debug(
                     f'Downtime of dependency "{dependency.name}" detected')
                 key, c = str(id(self.dependent)), Conf()
-                if key in c.iterables:
+                if self.pause_dependent and key in c.iterables:
                     c.iterables[key].send_signal(Signal.PAUSE)
                 if self._downtime_callback:
                     if iscoroutinecallable(self._downtime_callback):
