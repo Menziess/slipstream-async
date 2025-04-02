@@ -72,7 +72,7 @@ To prevent race conditions, Cache's ``transaction`` context manager can be used:
 
 ::
 
-    with cache.transaction('fish'):
+    async with cache.transaction('fish'):
         cache['fish'] = '🐟'
 
 - This only works for asynchronous code (not for multithreading or multiprocessing code)
@@ -215,7 +215,7 @@ Checkpoints automatically handle pausing of dependent streams when they are boun
     @handle(dependent)
     async def dependent_handler(msg):
         key, val, offset = msg.key, msg.value, msg.offset
-        c.check_pulse(marker=msg['event_timestamp'], offset=offset)
+        await c.check_pulse(marker=msg['event_timestamp'], offset=offset)
         yield key, msg
 
 On the first pulse check, no message might have been received from ``dependency`` yet.

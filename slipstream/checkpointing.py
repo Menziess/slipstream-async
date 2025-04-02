@@ -151,7 +151,7 @@ class Checkpoint:
     >>> @handle(dependent)
     ... async def dependent_handler(msg):
     ...     key, val, offset = msg.key, msg.value, msg.offset
-    ...     c.check_pulse(marker=msg['event_timestamp'], offset=offset)
+    ...     await c.check_pulse(marker=msg['event_timestamp'], offset=offset)
     ...     yield key, msg
 
     >>> @handle(dependency)
