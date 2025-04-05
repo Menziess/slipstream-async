@@ -1,12 +1,15 @@
 """Top level objects."""
 
 from slipstream.__version__ import VERSION
-from slipstream.core import Conf, Topic, handle, stream
+from slipstream.caching import rocksdict_available
+from slipstream.core import Conf, aiokafka_available, handle, stream
 
-try:
+if rocksdict_available:
     from slipstream.caching import Cache
-except ImportError:
-    pass
+
+if aiokafka_available:
+    from slipstream.core import Topic
+
 
 __all__ = [
     'VERSION',
