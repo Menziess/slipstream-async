@@ -1,7 +1,9 @@
 """Slipstream interfaces."""
 
 from abc import ABCMeta, abstractmethod
-from typing import Any, TypeAlias
+from typing import Any, AsyncIterator, TypeAlias
+
+from slipstream.utils import PubSub
 
 Key: TypeAlias = str | int | float | bytes | bool
 
@@ -20,13 +22,21 @@ class ICodec(metaclass=ABCMeta):
         raise NotImplementedError
 
 
-class ICache(metaclass=ABCMeta):
-    """Base class for cache implementations."""
+class CacheMeta(ABCMeta):
+    """Metaclass adds default functionality to ICache."""
 
-    @abstractmethod
-    async def __call__(self, key: Key, val: Any) -> None:
-        """Call cache to set item."""
-        raise NotImplementedError
+    def __call__(cls, *args, **kwargs):
+        """Adding instance variables."""
+        instance = super().__call__(*args, **kwargs)
+        if not hasattr(instance, '_pubsub'):
+            instance._pubsub = PubSub()
+        if not hasattr(instance, '_iterable_key'):
+            instance._iterable_key = str(id(instance)) + 'cache'
+        return instance
+
+
+class ICache(metaclass=CacheMeta):
+    """Base class for cache implementations."""
 
     @abstractmethod
     def __contains__(self, key: Key) -> bool:
@@ -47,3 +57,17 @@ class ICache(metaclass=ABCMeta):
     def __setitem__(self, key: Key, val: Any) -> None:
         """Set item in db."""
         raise NotImplementedError
+
+    async def __call__(self, key: Key, val: Any) -> None:
+        """Call cache to set item."""
+        self.__setitem__(key, val)
+        await self._pubsub.apublish(               # type: ignore[attr-defined]
+            self._iterable_key, (key, val)         # type: ignore[attr-defined]
+        )
+
+    async def __aiter__(self) -> AsyncIterator[Any]:
+        """Provide updates on writes to cache."""
+        async for msg in self._pubsub.iter_topic(  # type: ignore[attr-defined]
+            self._iterable_key                     # type: ignore[attr-defined]
+        ):
+            yield msg
