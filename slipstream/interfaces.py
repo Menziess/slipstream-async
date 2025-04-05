@@ -36,7 +36,28 @@ class CacheMeta(ABCMeta):
 
 
 class ICache(metaclass=CacheMeta):
-    """Base class for cache implementations."""
+    """Base class for cache implementations.
+
+    >>> class MyCache(ICache):
+    ...     def __init__(self):
+    ...         self.db = {}
+    ...     def __contains__(self, key: Key) -> bool:
+    ...         return key in self.db
+    ...     def __delitem__(self, key: Key) -> None:
+    ...         del self.db[key]
+    ...     def __getitem__(self, key: Key | list[Key]) -> Any:
+    ...         return self.db.get(key, None)
+    ...     def __setitem__(self, key: Key, val: Any) -> None:
+    ...         self.db[key] = val
+
+    >>> cache = MyCache()
+    >>> cache['prize'] = '🏆'
+    >>> cache['prize']
+    '🏆'
+    >>> del cache['prize']
+    >>> 'prize' in cache
+    False
+    """
 
     @abstractmethod
     def __contains__(self, key: Key) -> bool:
@@ -50,7 +71,12 @@ class ICache(metaclass=CacheMeta):
 
     @abstractmethod
     def __getitem__(self, key: Key | list[Key]) -> Any:
-        """Get item from db or None."""
+        """Get item from db or None.
+
+        Important:
+        - This method should **not** raise a `KeyError` if key does not exist.
+        - Instead, return None.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -59,14 +85,14 @@ class ICache(metaclass=CacheMeta):
         raise NotImplementedError
 
     async def __call__(self, key: Key, val: Any) -> None:
-        """Call cache to set item."""
+        """Set item in db while also publishing to pubsub."""
         self.__setitem__(key, val)
         await self._pubsub.apublish(               # type: ignore[attr-defined]
             self._iterable_key, (key, val)         # type: ignore[attr-defined]
         )
 
     async def __aiter__(self) -> AsyncIterator[Any]:
-        """Provide updates on writes to cache."""
+        """Consume published updates to cache."""
         async for msg in self._pubsub.iter_topic(  # type: ignore[attr-defined]
             self._iterable_key                     # type: ignore[attr-defined]
         ):
