@@ -11,10 +11,10 @@ Slipstream provides a data-flow model to simplify development of stateful stream
 - **Freedom:** allowing arbitrary code free of limiting abstractions
 - **Speed:** optimized and configurable defaults to get started quickly
 
-Consume any source that can be turned into an ``Async Iterable``; Kafka, streaming API's, et cetera.
-Sink or cache data to any ``Callable``; Kafka, RocksDB, API's.
-Perform any arbitrary stateful operation -- joining, aggregating, filtering -- using regular Python code.
-Detect dependency stream downtimes, pause dependent streams, or send out corrections.
+Consume data from any ``Async Iterable`` source: Kafka, Streaming API's, Python generators, Cache updates.
+Produce data to any ``Callable``: Kafka, RocksDB, API's, Databases.
+Perform any arbitrary stateful operation using regular Python code: Joining, Aggregating, Filtering.
+Detect and handle dependency stream downtimes: Pausing, Catching up, Resuming, and Correcting.
 
 Demo
 ^^^^
