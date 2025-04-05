@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import (
     Any,
-    AsyncIterator,
     Callable,
     Dict,
     List,
@@ -17,7 +16,6 @@ from typing import (
 )
 
 from slipstream.interfaces import ICache, Key
-from slipstream.utils import PubSub
 
 rocksdict_available = False
 
@@ -94,7 +92,6 @@ if rocksdict_available:
                 for key in Rdict.list_cf(path, options)
             } if os.path.exists(path + '/CURRENT') else {}
             self.db = Rdict(path, options, column_families, access_type)
-            self.pubsub, self.iterable_key = PubSub(), str(id(self)) + 'cache'
 
         @staticmethod
         def _default_options(target_table_size: int):
@@ -128,16 +125,6 @@ if rocksdict_available:
             index = hash(key) % self._number_of_locks
             async with (lock := self._locks[index]):
                 yield lock
-
-        async def __call__(self, key: Key, val: Any, *args: Any) -> None:
-            """Call cache to set item."""
-            self.__setitem__(key, val)
-            await self.pubsub.apublish(self.iterable_key, (key, val))
-
-        async def __aiter__(self) -> AsyncIterator[Any]:
-            """Provide updates on writes to cache."""
-            async for msg in self.pubsub.iter_topic(self.iterable_key):
-                yield msg
 
         def __contains__(self, key: Key) -> bool:
             """Key exists in db."""
