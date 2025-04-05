@@ -24,7 +24,8 @@ from slipstream.utils import (
     AsyncCallable,
     PubSub,
     Singleton,
-    get_params_names,
+    get_params,
+    get_positional_params,
     iscoroutinecallable,
 )
 
@@ -282,9 +283,9 @@ if aiokafka_available:
             ] = None
 
             if diff := set(self.conf).difference({
-                **get_params_names(AIOKafkaConsumer),
-                **get_params_names(AIOKafkaProducer),
-                **get_params_names(AIOKafkaClient),
+                *get_params(AIOKafkaConsumer),
+                *get_params(AIOKafkaProducer),
+                *get_params(AIOKafkaClient),
             }):
                 _logger.warning(
                     f'Unexpected Topic {self.name} '
@@ -300,7 +301,7 @@ if aiokafka_available:
         @property
         async def admin(self) -> AIOKafkaClient:
             """Get started instance of Kafka admin client."""
-            params = get_params_names(AIOKafkaClient)
+            params = get_params(AIOKafkaClient)
             return AIOKafkaClient(**{
                 k: v
                 for k, v in self.conf.items()
@@ -362,7 +363,7 @@ if aiokafka_available:
 
         async def get_consumer(self) -> AIOKafkaConsumer:
             """Get started instance of Kafka consumer."""
-            params = get_params_names(AIOKafkaConsumer)
+            params = get_params(AIOKafkaConsumer)
             if self.codec:
                 self.conf['value_deserializer'] = self.codec.decode
             consumer = AIOKafkaConsumer(self.name, **{
@@ -381,7 +382,7 @@ if aiokafka_available:
 
         async def get_producer(self):
             """Get started instance of Kafka producer."""
-            params = get_params_names(AIOKafkaProducer)
+            params = get_params(AIOKafkaProducer)
             if self.codec:
                 self.conf['value_serializer'] = self.codec.encode
             producer = AIOKafkaProducer(**{
@@ -536,23 +537,36 @@ if aiokafka_available:
                     )
 
 
+def _warn_user_wrong_sink_value(f, s, output):
+    """When using Topic or ICache as sink, warn user on bad output."""
+    if isinstance(s, (Topic, ICache)) and (
+        not isinstance(output, tuple)
+        or len(output) != 2
+    ):
+        raise ValueError(
+            f'{s.__class__.__name__} sink expects: '
+            f'Tuple[key, val] in {f.__name__}, got: {output}'
+        )
+
+
 async def _sink_output(
     f: Callable[..., Any],
     s: AsyncCallable,
     output: Any
 ) -> None:
+    _warn_user_wrong_sink_value(f, s, output)
     is_coroutine = iscoroutinecallable(s)
-    if isinstance(s, ICache) and not isinstance(output, tuple):
-        raise ValueError(
-            f'Cache sink expects: Tuple[key, val] in {f.__name__}.')
-    elif isinstance(s, Topic) and not isinstance(output, tuple):
-        raise ValueError(
-            f'Topic sink expects: Tuple[key, val] in {f.__name__}.')
-    elif isinstance(s, (Topic, ICache)):
-        await s(*output)  # type: ignore
+    if (
+        isinstance(output, tuple)
+        and len(output) == len(get_positional_params(s))
+    ):
+        if is_coroutine:
+            await s(*output)
+        else:
+            s(*output)
     else:
         if is_coroutine:
-            await s(output)  # type: ignore
+            await s(output)
         else:
             s(output)
 

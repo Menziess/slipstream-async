@@ -1,12 +1,15 @@
 from asyncio import gather
-from inspect import Parameter, _ParameterKind
 
 import pytest
+from aiokafka import AIOKafkaClient
+from conftest import MockCache
 
+from slipstream.core import Topic
 from slipstream.utils import (
     PubSub,
     Singleton,
-    get_params_names,
+    get_params,
+    get_positional_params,
     iscoroutinecallable,
 )
 
@@ -28,15 +31,32 @@ def test_iscoroutinecallable():
     assert iscoroutinecallable(_A)
 
 
-def test_get_params_names():
-
-    def my_func(*a, b=0):
+def test_get_positional_params():
+    """Should return strictly positional parameter names."""
+    def f(a, b, c=0, *args, d=0, **kwargs):
         pass
 
-    assert dict(get_params_names(my_func)) == {
-        'a': Parameter('a', _ParameterKind.VAR_POSITIONAL),
-        'b': Parameter('b', _ParameterKind.KEYWORD_ONLY, default=0),
-    }
+    c = MockCache()
+    t = Topic('test')
+
+    assert get_positional_params(f) == ('a', 'b')
+    assert get_positional_params(c) == ('key', 'val')
+    assert get_positional_params(t) == ('key', 'value')
+    assert get_positional_params(AIOKafkaClient) == ()
+
+
+def test_get_params():
+    """Should return all parameter names."""
+    def f(a, b, c=0, *args, d=0, **kwargs):
+        pass
+
+    c = MockCache()
+    t = Topic('test')
+
+    assert get_params(f) == ('a', 'b', 'c', 'args', 'd', 'kwargs')
+    assert get_params(c) == ('key', 'val')
+    assert get_params(t) == ('key', 'value', 'headers', 'kwargs')
+    assert 'bootstrap_servers' in get_params(AIOKafkaClient)
 
 
 def test_Singleton():

@@ -1,7 +1,7 @@
 """Slipstream utilities."""
 
 from asyncio import Queue
-from inspect import iscoroutinefunction, signature
+from inspect import _empty, iscoroutinefunction, signature
 from typing import (
     Any,
     AsyncIterator,
@@ -21,10 +21,25 @@ def iscoroutinecallable(o: Any) -> bool:
     )
 
 
-def get_params_names(o: Any):
+def get_positional_params(o: Any) -> tuple[str, ...]:
+    """Return function positional parameters."""
+    if hasattr(o, '__code__'):
+        c = o.__code__
+        positional_count = c.co_argcount - len(o.__defaults__ or ())
+        return c.co_varnames[:positional_count]
+
+    params = signature(o).parameters
+    return tuple(
+        param.name for param in params.values()
+        if param.kind in (param.POSITIONAL_OR_KEYWORD, param.POSITIONAL_ONLY)
+        and param.default is _empty
+    )
+
+
+def get_params(o: Any):
     """Return function parameters."""
-    parameters = signature(o).parameters.values()
-    return getattr(parameters, 'mapping')
+    params = signature(o).parameters
+    return tuple(params.keys())
 
 
 class Singleton(type):
