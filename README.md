@@ -64,7 +64,7 @@ Spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), usin
 docker compose up broker -d
 ```
 
-Follow the docs and set up a Kafka connection: [slipstream.readthedocs.io](https://slipstream.readthedocs.io).
+Follow the docs and set up a Kafka connection: [slipstream.readthedocs.io](https://slipstream.readthedocs.io/en/latest/getting_started.html#kafka).
 
 ## Features
 
