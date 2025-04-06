@@ -9,7 +9,6 @@ from slipstream.utils import (
     PubSub,
     Singleton,
     get_params,
-    get_positional_params,
     iscoroutinecallable,
 )
 
@@ -29,20 +28,6 @@ def test_iscoroutinecallable():
     assert not iscoroutinecallable(_s)
     assert iscoroutinecallable(_a)
     assert iscoroutinecallable(_A)
-
-
-def test_get_positional_params():
-    """Should return strictly positional parameter names."""
-    def f(a, b, c=0, *args, d=0, **kwargs):
-        pass
-
-    c = MockCache()
-    t = Topic('test')
-
-    assert get_positional_params(f) == ('a', 'b')
-    assert get_positional_params(c) == ('key', 'val')
-    assert get_positional_params(t) == ('key', 'value')
-    assert get_positional_params(AIOKafkaClient) == ()
 
 
 def test_get_params():

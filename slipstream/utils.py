@@ -1,7 +1,7 @@
 """Slipstream utilities."""
 
 from asyncio import Queue
-from inspect import _empty, iscoroutinefunction, signature
+from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
     AsyncIterator,
@@ -18,21 +18,6 @@ def iscoroutinecallable(o: Any) -> bool:
     return iscoroutinefunction(o) or (
         hasattr(o, '__call__')
         and iscoroutinefunction(o.__call__)
-    )
-
-
-def get_positional_params(o: Any) -> tuple[str, ...]:
-    """Return function positional parameters."""
-    if hasattr(o, '__code__'):
-        c = o.__code__
-        positional_count = c.co_argcount - len(o.__defaults__ or ())
-        return c.co_varnames[:positional_count]
-
-    params = signature(o).parameters
-    return tuple(
-        param.name for param in params.values()
-        if param.kind in (param.POSITIONAL_OR_KEYWORD, param.POSITIONAL_ONLY)
-        and param.default is _empty
     )
 
 

@@ -25,7 +25,6 @@ from slipstream.utils import (
     PubSub,
     Singleton,
     get_params,
-    get_positional_params,
     iscoroutinecallable,
 )
 
@@ -537,33 +536,18 @@ if aiokafka_available:
                     )
 
 
-def _warn_user_wrong_sink_value(f, s, output):
-    """When using Topic or ICache as sink, warn user on bad output."""
-    if isinstance(s, (Topic, ICache)) and (
-        not isinstance(output, tuple)
-        or len(output) != 2
-    ):
-        raise ValueError(
-            f'{s.__class__.__name__} sink expects: '
-            f'Tuple[key, val] in {f.__name__}, got: {output}'
-        )
-
-
 async def _sink_output(
     f: Callable[..., Any],
     s: AsyncCallable,
     output: Any
 ) -> None:
-    _warn_user_wrong_sink_value(f, s, output)
     is_coroutine = iscoroutinecallable(s)
-    if (
-        isinstance(output, tuple)
-        and len(output) == len(get_positional_params(s))
-    ):
-        if is_coroutine:
-            await s(*output)
-        else:
-            s(*output)
+    known_sinks = (Topic, ICache) if aiokafka_available else (ICache,)
+    if isinstance(s, known_sinks) and not isinstance(output, tuple):
+        raise ValueError(
+            f'Sink expects: (key, val) in {f.__name__}, got :{output}.')
+    elif isinstance(s, known_sinks):
+        await s(*output)
     else:
         if is_coroutine:
             await s(output)
