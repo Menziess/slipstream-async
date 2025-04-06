@@ -21,10 +21,10 @@ def iscoroutinecallable(o: Any) -> bool:
     )
 
 
-def get_params_names(o: Any):
-    """Return function parameters."""
-    parameters = signature(o).parameters.values()
-    return getattr(parameters, 'mapping')
+def get_param_names(o: Any):
+    """Return function parameter names."""
+    params = signature(o).parameters
+    return tuple(params.keys())
 
 
 class Singleton(type):

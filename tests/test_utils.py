@@ -1,12 +1,14 @@
 from asyncio import gather
-from inspect import Parameter, _ParameterKind
 
 import pytest
+from aiokafka import AIOKafkaClient
+from conftest import MockCache
 
+from slipstream.core import Topic
 from slipstream.utils import (
     PubSub,
     Singleton,
-    get_params_names,
+    get_param_names,
     iscoroutinecallable,
 )
 
@@ -28,15 +30,18 @@ def test_iscoroutinecallable():
     assert iscoroutinecallable(_A)
 
 
-def test_get_params_names():
-
-    def my_func(*a, b=0):
+def test_get_param_names():
+    """Should return all parameter names."""
+    def f(a, b, c=0, *args, d=0, **kwargs):
         pass
 
-    assert dict(get_params_names(my_func)) == {
-        'a': Parameter('a', _ParameterKind.VAR_POSITIONAL),
-        'b': Parameter('b', _ParameterKind.KEYWORD_ONLY, default=0),
-    }
+    c = MockCache()
+    t = Topic('test')
+
+    assert get_param_names(f) == ('a', 'b', 'c', 'args', 'd', 'kwargs')
+    assert get_param_names(c) == ('key', 'val')
+    assert get_param_names(t) == ('key', 'value', 'headers', 'kwargs')
+    assert 'bootstrap_servers' in get_param_names(AIOKafkaClient)
 
 
 def test_Singleton():

@@ -86,10 +86,6 @@ class MockCache(ICache):
         """Set dict as internal store.."""
         self._store = {}
 
-    async def __call__(self, key: Key, val: Any) -> None:
-        """Call cache to set item."""
-        self._store[key] = val
-
     def __contains__(self, key: Key) -> bool:
         """Key exists in db."""
         return key in self._store

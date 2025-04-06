@@ -5,7 +5,7 @@ import pytest
 from conftest import emoji
 
 from slipstream import Conf
-from slipstream.core import Topic
+from slipstream.core import Topic, _sink_output
 
 
 @pytest.mark.asyncio
@@ -98,3 +98,22 @@ async def test_aiter_fail(mocker, caplog):
             break
 
     assert f'Error raised while consuming from Topic {topic}' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_sink_output(mocker):
+    """Should return the output of the sink function."""
+    def src():
+        pass
+
+    stub = mocker.stub(name='handler')
+
+    def sync_f(x): stub(x)
+    await _sink_output(src, sync_f, (1, 2))
+    stub.assert_called_once_with((1, 2))
+    stub.reset_mock()
+
+    async def async_f(x): stub(x)
+    await _sink_output(src, async_f, (1, 2))
+    stub.assert_called_once_with((1, 2))
+    stub.reset_mock()

@@ -19,43 +19,37 @@ from typing import (
     cast,
 )
 
-from aiokafka import TopicPartition
-
-try:
-    from aiokafka import (  # type: ignore
-        AIOKafkaClient,
-        AIOKafkaConsumer,
-        AIOKafkaProducer,
-        ConsumerRecord,
-    )
-    from aiokafka.helpers import create_ssl_context  # type: ignore
-except ModuleNotFoundError:
-    print('Install aiokafka or slipstream-async[kafka]')
-    raise
-
 from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import (
     AsyncCallable,
     PubSub,
     Singleton,
-    get_params_names,
+    get_param_names,
     iscoroutinecallable,
 )
+
+aiokafka_available = False
+
+try:
+    import aiokafka  # noqa: F401  # ruff: noqa # pyright: ignore
+    aiokafka_available = True
+except ImportError:
+    pass
 
 __all__ = [
     'READ_FROM_START',
     'READ_FROM_END',
     'Signal',
     'PausableStream',
+    'Topic',
 ]
 
-KAFKA_CLASSES_PARAMS: dict[str, Any] = {
-    **get_params_names(AIOKafkaConsumer),
-    **get_params_names(AIOKafkaProducer),
-    **get_params_names(AIOKafkaClient),
-}
+
 READ_FROM_START = -2
 READ_FROM_END = -1
+
+
+_logger = logging.getLogger(__name__)
 
 
 class Signal(Enum):
@@ -69,9 +63,6 @@ class Signal(Enum):
     SENTINEL = 0
     PAUSE = 1
     RESUME = 2
-
-
-_logger = logging.getLogger(__name__)
 
 
 class PausableStream:
@@ -235,292 +226,314 @@ class Conf(metaclass=Singleton):
         return str(self.conf)
 
 
-class Topic:
-    """Act as a consumer and producer.
+if aiokafka_available:
+    from aiokafka import (  # type: ignore
+        AIOKafkaClient,
+        AIOKafkaConsumer,
+        AIOKafkaProducer,
+        ConsumerRecord,
+        TopicPartition,
+    )
+    from aiokafka.helpers import create_ssl_context  # type: ignore
 
-    >>> topic = Topic('emoji', {
-    ...     'bootstrap_servers': 'localhost:29091',
-    ...     'auto_offset_reset': 'earliest',
-    ...     'group_id': 'demo',
-    ... })
+    class Topic:
+        """Act as a consumer and producer.
 
-    Loop over topic (iterable) to consume from it:
+        >>> topic = Topic('emoji', {
+        ...     'bootstrap_servers': 'localhost:29091',
+        ...     'auto_offset_reset': 'earliest',
+        ...     'group_id': 'demo',
+        ... })
 
-    >>> async for msg in topic:               # doctest: +SKIP
-    ...     print(msg.value)
+        Loop over topic (iterable) to consume from it:
 
-    Call topic (callable) with data to produce to it:
+        >>> async for msg in topic:               # doctest: +SKIP
+        ...     print(msg.value)
 
-    >>> await topic({'msg': 'Hello World!'})  # doctest: +SKIP
-    """
+        Call topic (callable) with data to produce to it:
 
-    def __init__(
-        self,
-        name: str,
-        conf: dict[str, Any] = {},
-        offset: Optional[int | dict[int, int]] = None,
-        codec: Optional[ICodec] = None,
-        dry: bool = False,
-    ):
-        """Create topic instance to produce and consume messages."""
-        c = Conf()
-        c.register_exit_hook(self.exit_hook)
-        self.name = name
-        self.conf = {**c.conf, **conf}
-        self.starting_offset = offset
-        self.codec = codec
-        self.dry = dry
+        >>> await topic({'msg': 'Hello World!'})  # doctest: +SKIP
+        """
 
-        self.consumer: Optional[AIOKafkaConsumer] = None
-        self.producer: Optional[AIOKafkaProducer] = None
-        self._generator: Optional[
-            AsyncGenerator[
-                Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
-                bool | None
-            ]
-        ] = None
-
-        if diff := set(self.conf).difference(KAFKA_CLASSES_PARAMS):
-            _logger.warning(
-                f'Unexpected Topic {self.name} conf entries: {",".join(diff)}')
-
-        if (
-            self.conf.get('security_protocol') in ('SSL', 'SASL_SSL')
-            and not self.conf.get('ssl_context')
+        def __init__(
+            self,
+            name: str,
+            conf: dict[str, Any] = {},
+            offset: Optional[int | dict[int, int]] = None,
+            codec: Optional[ICodec] = None,
+            dry: bool = False,
         ):
-            self.conf['ssl_context'] = create_ssl_context()
+            """Create topic instance to produce and consume messages."""
+            c = Conf()
+            c.register_exit_hook(self.exit_hook)
+            self.name = name
+            self.conf = {**c.conf, **conf}
+            self.starting_offset = offset
+            self.codec = codec
+            self.dry = dry
 
-    @property
-    async def admin(self) -> AIOKafkaClient:
-        """Get started instance of Kafka admin client."""
-        params = get_params_names(AIOKafkaClient)
-        return AIOKafkaClient(**{
-            k: v
-            for k, v in self.conf.items()
-            if k in params
-        })
+            self.consumer: Optional[AIOKafkaConsumer] = None
+            self.producer: Optional[AIOKafkaProducer] = None
+            self._generator: Optional[
+                AsyncGenerator[
+                    Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
+                    bool | None
+                ]
+            ] = None
 
-    async def seek(
-        self,
-        offset: int | dict[int, int],
-        consumer: Optional[AIOKafkaConsumer] = None,
-        timeout: float = 30.0
-    ):
-        """Seek to offset."""
-        c = consumer or self.consumer
-        if not c:
-            raise RuntimeError('No consumer provided.')
+            if diff := set(self.conf).difference({
+                *get_param_names(AIOKafkaConsumer),
+                *get_param_names(AIOKafkaProducer),
+                *get_param_names(AIOKafkaClient),
+            }):
+                _logger.warning(
+                    f'Unexpected Topic {self.name} '
+                    f'conf entries: {",".join(diff)}'
+                )
 
-        if isinstance(offset, int) and offset < READ_FROM_START:
-            raise ValueError('Offset must be bigger than -3.')
+            if (
+                self.conf.get('security_protocol') in ('SSL', 'SASL_SSL')
+                and not self.conf.get('ssl_context')
+            ):
+                self.conf['ssl_context'] = create_ssl_context()
 
-        # Wait until all partitions are assigned
-        partitions = c.partitions_for_topic(self.name) or set()
-        ready_partitions = set()
-        max_attempts = int(timeout / 0.1)
-        for i in range(max_attempts):
-            assignment = c.assignment()
-            ready_partitions = set(_.partition for _ in c.assignment())
-            if partitions.issubset(ready_partitions):
-                break
-            if i % 100 == 0:
-                _logger.info(
-                    f'Waiting for partitions {partitions - ready_partitions}')
-            await sleep(0.1)
-        else:
-            raise RuntimeError(
-                f'Failed to assign {partitions} after {timeout}s, '
-                f'got: {ready_partitions}'
-            )
+        @property
+        async def admin(self) -> AIOKafkaClient:
+            """Get started instance of Kafka admin client."""
+            params = get_param_names(AIOKafkaClient)
+            return AIOKafkaClient(**{
+                k: v
+                for k, v in self.conf.items()
+                if k in params
+            })
 
-        # The desired offset per partition
-        offsets = {
-            TopicPartition(self.name, p): offset
-            for p in partitions
-        } if isinstance(offset, int) else {
-            TopicPartition(self.name, p): o
-            for p, o in offset.items()
-        }
+        async def seek(
+            self,
+            offset: int | dict[int, int],
+            consumer: Optional[AIOKafkaConsumer] = None,
+            timeout: float = 30.0
+        ):
+            """Seek to offset."""
+            c = consumer or self.consumer
+            if not c:
+                raise RuntimeError('No consumer provided.')
 
-        # Perform seek
-        if offset == READ_FROM_START:
-            await c.seek_to_beginning(*assignment)
-        elif offset == READ_FROM_END:
-            await c.seek_to_end(*assignment)
-        else:
-            for p, o in offsets.items():
-                c.seek(p, o)
+            if isinstance(offset, int) and offset < READ_FROM_START:
+                raise ValueError('Offset must be bigger than -3.')
 
-    async def get_consumer(self) -> AIOKafkaConsumer:
-        """Get started instance of Kafka consumer."""
-        params = get_params_names(AIOKafkaConsumer)
-        if self.codec:
-            self.conf['value_deserializer'] = self.codec.decode
-        consumer = AIOKafkaConsumer(self.name, **{
-            k: v
-            for k, v in self.conf.items()
-            if k in params
-        })
-        await consumer.start()
-        if self.starting_offset:
+            # Wait until all partitions are assigned
+            partitions = c.partitions_for_topic(self.name) or set()
+            ready_partitions = set()
+            max_attempts = int(timeout / 0.1)
+            for i in range(max_attempts):
+                assignment = c.assignment()
+                ready_partitions = set(_.partition for _ in c.assignment())
+                if partitions.issubset(ready_partitions):
+                    break
+                if i % 100 == 0:
+                    _logger.info(
+                        f'Waiting for partitions '
+                        f'{partitions - ready_partitions}'
+                    )
+                await sleep(0.1)
+            else:
+                raise RuntimeError(
+                    f'Failed to assign {partitions} after {timeout}s, '
+                    f'got: {ready_partitions}'
+                )
+
+            # The desired offset per partition
+            offsets = {
+                TopicPartition(self.name, p): offset
+                for p in partitions
+            } if isinstance(offset, int) else {
+                TopicPartition(self.name, p): o
+                for p, o in offset.items()
+            }
+
+            # Perform seek
+            if offset == READ_FROM_START:
+                await c.seek_to_beginning(*assignment)
+            elif offset == READ_FROM_END:
+                await c.seek_to_end(*assignment)
+            else:
+                for p, o in offsets.items():
+                    c.seek(p, o)
+
+        async def get_consumer(self) -> AIOKafkaConsumer:
+            """Get started instance of Kafka consumer."""
+            params = get_param_names(AIOKafkaConsumer)
+            if self.codec:
+                self.conf['value_deserializer'] = self.codec.decode
+            consumer = AIOKafkaConsumer(self.name, **{
+                k: v
+                for k, v in self.conf.items()
+                if k in params
+            })
+            await consumer.start()
+            if self.starting_offset:
+                try:
+                    await self.seek(self.starting_offset, consumer)
+                except Exception:
+                    await consumer.stop()
+                    raise
+            return consumer
+
+        async def get_producer(self):
+            """Get started instance of Kafka producer."""
+            params = get_param_names(AIOKafkaProducer)
+            if self.codec:
+                self.conf['value_serializer'] = self.codec.encode
+            producer = AIOKafkaProducer(**{
+                k: v
+                for k, v in self.conf.items()
+                if k in params
+            })
+            await producer.start()
+            return producer
+
+        async def __call__(
+            self,
+            key: Any,
+            value: Any,
+            headers: Optional[dict[str, str]] = None,
+            **kwargs: Any
+        ) -> None:
+            """Produce message to topic."""
+            if isinstance(key, str) and not self.conf.get(
+                'key_serializer'
+            ):
+                key = key.encode()
+            if isinstance(value, str) and not self.conf.get(
+                'value_serializer'
+            ):
+                value = value.encode()
+            headers_list = [
+                (k, v.encode())
+                for k, v in headers.items()
+            ] if headers else None
+            if self.dry:
+                _logger.warning(
+                    f'Skipped sending message to {self.name} [dry=True]'
+                )
+                return
+            if not self.producer:
+                self.producer = await self.get_producer()
             try:
-                await self.seek(self.starting_offset, consumer)
-            except Exception:
-                await consumer.stop()
-                raise
-        return consumer
-
-    async def get_producer(self):
-        """Get started instance of Kafka producer."""
-        params = get_params_names(AIOKafkaProducer)
-        if self.codec:
-            self.conf['value_serializer'] = self.codec.encode
-        producer = AIOKafkaProducer(**{
-            k: v
-            for k, v in self.conf.items()
-            if k in params
-        })
-        await producer.start()
-        return producer
-
-    async def __call__(
-        self,
-        key: Any,
-        value: Any,
-        headers: Optional[dict[str, str]] = None,
-        **kwargs: Any
-    ) -> None:
-        """Produce message to topic."""
-        if isinstance(key, str) and not self.conf.get('key_serializer'):
-            key = key.encode()
-        if isinstance(value, str) and not self.conf.get('value_serializer'):
-            value = value.encode()
-        headers_list = [
-            (k, v.encode())
-            for k, v in headers.items()
-        ] if headers else None
-        if self.dry:
-            _logger.warning(
-                f'Skipped sending message to {self.name} [dry=True]'
-            )
-            return
-        if not self.producer:
-            self.producer = await self.get_producer()
-        try:
-            await self.producer.send_and_wait(
-                self.name,
-                key=key,
-                value=value,
-                headers=headers_list,
-                **kwargs
-            )
-        except Exception as e:
-            _logger.error(
-                f'Error raised while producing to Topic {self.name}: '
-                f'{e.args[0] if e.args else ""}'
-            )
-            raise
-
-    async def init_generator(self) -> AsyncGenerator[
-        Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
-        bool | None
-    ]:
-        """Iterate over messages from topic."""
-        if not self.consumer:
-            self.consumer = await self.get_consumer()
-
-        async def generator(consumer: AIOKafkaConsumer):
-            signal = None
-            try:
-                msg: ConsumerRecord[Any, Any]
-                async for msg in consumer:
-                    if (
-                        isinstance(msg.key, bytes)
-                        and not self.conf.get('key_deserializer')
-                    ):
-                        msg.key = msg.key.decode()
-                    if (
-                        isinstance(msg.value, bytes)
-                        and not self.conf.get('value_deserializer')
-                    ):
-                        msg.value = msg.value.decode()
-
-                    signal = yield msg
-
-                    if signal is Signal.PAUSE:
-                        consumer.pause(*consumer.assignment())
-                        _logger.debug(f'{self.name} paused')
-                        while True:
-                            signal = yield Signal.SENTINEL
-                            if signal is Signal.RESUME:
-                                _logger.debug(f'{self.name} reactivated')
-                                consumer.resume(*consumer.assignment())
-                                break
-
-                            # Send heartbeats through getmany
-                            await consumer.getmany()
-                            await sleep(1)
-
+                await self.producer.send_and_wait(
+                    self.name,
+                    key=key,
+                    value=value,
+                    headers=headers_list,
+                    **kwargs
+                )
             except Exception as e:
                 _logger.error(
-                    f'Error raised while consuming from Topic {self.name}: '
+                    f'Error raised while producing to Topic {self.name}: '
                     f'{e.args[0] if e.args else ""}'
                 )
                 raise
 
-        if not self._generator:
-            self._generator = generator(self.consumer)
-        return self._generator
+        async def init_generator(self) -> AsyncGenerator[
+            Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
+            bool | None
+        ]:
+            """Iterate over messages from topic."""
+            if not self.consumer:
+                self.consumer = await self.get_consumer()
 
-    async def __aiter__(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
-        """Iterate over messages from topic."""
-        if not self._generator:
-            await self.init_generator()
-        if not self._generator:
-            raise RuntimeError('Topic generator was unset.')
-        async for msg in self._generator:
-            if msg is not Signal.SENTINEL:
-                yield msg
+            async def generator(consumer: AIOKafkaConsumer):
+                signal = None
+                try:
+                    msg: ConsumerRecord[Any, Any]
+                    async for msg in consumer:
+                        if (
+                            isinstance(msg.key, bytes)
+                            and not self.conf.get('key_deserializer')
+                        ):
+                            msg.key = msg.key.decode()
+                        if (
+                            isinstance(msg.value, bytes)
+                            and not self.conf.get('value_deserializer')
+                        ):
+                            msg.value = msg.value.decode()
 
-    async def asend(self, value) -> ConsumerRecord[Any, Any]:
-        """Send data to generator."""
-        if not self._generator:
-            await self.init_generator()
-        if not self._generator:
-            raise RuntimeError('Topic generator was unset.')
-        generator = cast(
-            AsyncGenerator[ConsumerRecord[Any, Any], Signal | None],
-            self._generator
-        )
-        return await generator.asend(value)
+                        signal = yield msg
 
-    async def __next__(self) -> ConsumerRecord[Any, Any]:
-        """Get the next message from topic."""
-        if not self._generator:
-            await self.init_generator()
-        if not self._generator:
-            raise RuntimeError('Topic generator was unset.')
-        while (msg := await anext(self._generator)) is Signal.SENTINEL:
-            continue
-        return msg
+                        if signal is Signal.PAUSE:
+                            consumer.pause(*consumer.assignment())
+                            _logger.debug(f'{self.name} paused')
+                            while True:
+                                signal = yield Signal.SENTINEL
+                                if signal is Signal.RESUME:
+                                    _logger.debug(f'{self.name} reactivated')
+                                    consumer.resume(*consumer.assignment())
+                                    break
 
-    async def exit_hook(self) -> None:
-        """Cleanup and finalization."""
-        for client in (self.consumer, self.producer):
-            if not client:
+                                # Send heartbeats through getmany
+                                await consumer.getmany()
+                                await sleep(1)
+
+                except Exception as e:
+                    _logger.error(
+                        f'Error raised while consuming from Topic '
+                        f'{self.name}: {e.args[0] if e.args else ""}'
+                    )
+                    raise
+
+            if not self._generator:
+                self._generator = generator(self.consumer)
+            return self._generator
+
+        async def __aiter__(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
+            """Iterate over messages from topic."""
+            if not self._generator:
+                await self.init_generator()
+            if not self._generator:
+                raise RuntimeError('Topic generator was unset.')
+            async for msg in self._generator:
+                if msg is not Signal.SENTINEL:
+                    yield msg
+
+        async def asend(self, value) -> ConsumerRecord[Any, Any]:
+            """Send data to generator."""
+            if not self._generator:
+                await self.init_generator()
+            if not self._generator:
+                raise RuntimeError('Topic generator was unset.')
+            generator = cast(
+                AsyncGenerator[ConsumerRecord[Any, Any], Signal | None],
+                self._generator
+            )
+            return await generator.asend(value)
+
+        async def __next__(self) -> ConsumerRecord[Any, Any]:
+            """Get the next message from topic."""
+            if not self._generator:
+                await self.init_generator()
+            if not self._generator:
+                raise RuntimeError('Topic generator was unset.')
+            while (msg := await anext(self._generator)) is Signal.SENTINEL:
                 continue
-            try:
-                await wait_for(client.stop(), timeout=10)
-            except TimeoutError:
-                _logger.critical(
-                    f'Client for topic "{self.name}" failed '
-                    f'to shut down in time {client}'
-                )
-            except Exception as e:
-                _logger.critical(
-                    f'Client for topic "{self.name}" failed '
-                    f'to shut down gracefully {client}: {e}'
-                )
+            return msg
+
+        async def exit_hook(self) -> None:
+            """Cleanup and finalization."""
+            for client in (self.consumer, self.producer):
+                if not client:
+                    continue
+                try:
+                    await wait_for(client.stop(), timeout=10)
+                except TimeoutError:
+                    _logger.critical(
+                        f'Client for topic "{self.name}" failed '
+                        f'to shut down in time {client}'
+                    )
+                except Exception as e:
+                    _logger.critical(
+                        f'Client for topic "{self.name}" failed '
+                        f'to shut down gracefully {client}: {e}'
+                    )
 
 
 async def _sink_output(
@@ -529,17 +542,15 @@ async def _sink_output(
     output: Any
 ) -> None:
     is_coroutine = iscoroutinecallable(s)
-    if isinstance(s, ICache) and not isinstance(output, tuple):
+    known_sinks = (Topic, ICache) if aiokafka_available else (ICache,)
+    if isinstance(s, known_sinks) and not isinstance(output, tuple):
         raise ValueError(
-            f'Cache sink expects: Tuple[key, val] in {f.__name__}.')
-    elif isinstance(s, Topic) and not isinstance(output, tuple):
-        raise ValueError(
-            f'Topic sink expects: Tuple[key, val] in {f.__name__}.')
-    elif isinstance(s, (Topic, ICache)):
-        await s(*output)  # type: ignore
+            f'Sink expects: (key, val) in {f.__name__}, got :{output}.')
+    elif isinstance(s, known_sinks):
+        await s(*output)
     else:
         if is_coroutine:
-            await s(output)  # type: ignore
+            await s(output)
         else:
             s(output)
 
