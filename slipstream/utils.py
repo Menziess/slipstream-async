@@ -21,8 +21,8 @@ def iscoroutinecallable(o: Any) -> bool:
     )
 
 
-def get_params(o: Any):
-    """Return function parameters."""
+def get_param_names(o: Any):
+    """Return function parameter names."""
     params = signature(o).parameters
     return tuple(params.keys())
 

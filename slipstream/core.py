@@ -24,7 +24,7 @@ from slipstream.utils import (
     AsyncCallable,
     PubSub,
     Singleton,
-    get_params,
+    get_param_names,
     iscoroutinecallable,
 )
 
@@ -282,9 +282,9 @@ if aiokafka_available:
             ] = None
 
             if diff := set(self.conf).difference({
-                *get_params(AIOKafkaConsumer),
-                *get_params(AIOKafkaProducer),
-                *get_params(AIOKafkaClient),
+                *get_param_names(AIOKafkaConsumer),
+                *get_param_names(AIOKafkaProducer),
+                *get_param_names(AIOKafkaClient),
             }):
                 _logger.warning(
                     f'Unexpected Topic {self.name} '
@@ -300,7 +300,7 @@ if aiokafka_available:
         @property
         async def admin(self) -> AIOKafkaClient:
             """Get started instance of Kafka admin client."""
-            params = get_params(AIOKafkaClient)
+            params = get_param_names(AIOKafkaClient)
             return AIOKafkaClient(**{
                 k: v
                 for k, v in self.conf.items()
@@ -362,7 +362,7 @@ if aiokafka_available:
 
         async def get_consumer(self) -> AIOKafkaConsumer:
             """Get started instance of Kafka consumer."""
-            params = get_params(AIOKafkaConsumer)
+            params = get_param_names(AIOKafkaConsumer)
             if self.codec:
                 self.conf['value_deserializer'] = self.codec.decode
             consumer = AIOKafkaConsumer(self.name, **{
@@ -381,7 +381,7 @@ if aiokafka_available:
 
         async def get_producer(self):
             """Get started instance of Kafka producer."""
-            params = get_params(AIOKafkaProducer)
+            params = get_param_names(AIOKafkaProducer)
             if self.codec:
                 self.conf['value_serializer'] = self.codec.encode
             producer = AIOKafkaProducer(**{

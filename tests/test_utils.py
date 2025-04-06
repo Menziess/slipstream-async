@@ -8,7 +8,7 @@ from slipstream.core import Topic
 from slipstream.utils import (
     PubSub,
     Singleton,
-    get_params,
+    get_param_names,
     iscoroutinecallable,
 )
 
@@ -30,7 +30,7 @@ def test_iscoroutinecallable():
     assert iscoroutinecallable(_A)
 
 
-def test_get_params():
+def test_get_param_names():
     """Should return all parameter names."""
     def f(a, b, c=0, *args, d=0, **kwargs):
         pass
@@ -38,10 +38,10 @@ def test_get_params():
     c = MockCache()
     t = Topic('test')
 
-    assert get_params(f) == ('a', 'b', 'c', 'args', 'd', 'kwargs')
-    assert get_params(c) == ('key', 'val')
-    assert get_params(t) == ('key', 'value', 'headers', 'kwargs')
-    assert 'bootstrap_servers' in get_params(AIOKafkaClient)
+    assert get_param_names(f) == ('a', 'b', 'c', 'args', 'd', 'kwargs')
+    assert get_param_names(c) == ('key', 'val')
+    assert get_param_names(t) == ('key', 'value', 'headers', 'kwargs')
+    assert 'bootstrap_servers' in get_param_names(AIOKafkaClient)
 
 
 def test_Singleton():
