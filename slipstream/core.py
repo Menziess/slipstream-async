@@ -151,6 +151,7 @@ class Conf(metaclass=Singleton):
 
     pubsub = PubSub()
     iterables: dict[str, PausableStream] = {}
+    pipes: dict[AsyncCallable, tuple[str, tuple[AsyncCallable, ...]]] = {}
     exit_hooks: set[AsyncCallable] = set()
 
     def register_iterable(
@@ -164,10 +165,14 @@ class Conf(metaclass=Singleton):
     def register_handler(
         self,
         key: str,
-        handler: AsyncCallable
+        handler: AsyncCallable,
+        *pipe: AsyncCallable
     ):
         """Add handler to global Conf."""
-        self.pubsub.subscribe(key, handler)
+        if pipe:
+            self.pipes[handler] = (key, pipe)
+        else:
+            self.pubsub.subscribe(key, handler)
 
     def register_exit_hook(
         self,
@@ -182,6 +187,9 @@ class Conf(metaclass=Singleton):
             await gather(*[
                 self._distribute_messages(key, pausable_stream, kwargs)
                 for key, pausable_stream in self.iterables.items()
+            ], *[
+                self._pipe(self.pubsub.iter_topic(key), handler, *funcs)
+                for handler, (key, funcs) in self.pipes.items()
             ])
         except KeyboardInterrupt:
             pass
@@ -208,6 +216,18 @@ class Conf(metaclass=Singleton):
         """Publish messages from stream."""
         async for msg in pausable_stream:
             await self.pubsub.apublish(key, msg, **kwargs)
+
+    async def _pipe(
+        self,
+        data: AsyncIterator,
+        handler: AsyncCallable,
+        *funcs
+    ):
+        """Push stream through pipe before feeding it to the handler."""
+        for func in funcs:
+            data = func(data)
+        async for val in data:
+            await handler(val)
 
     def __init__(self, conf: dict[str, Any] = {}) -> None:
         """Define init behavior."""
@@ -557,6 +577,7 @@ async def _sink_output(
 
 def handle(
     *iterable: AsyncIterable[Any],
+    pipe: Iterable[AsyncCallable] = [],
     sink: Iterable[Callable | AsyncCallable] = []
 ):
     """Snaps function to stream.
@@ -610,7 +631,7 @@ def handle(
         for it in iterable:
             iterable_key = str(id(it))
             c.register_iterable(iterable_key, it)
-            c.register_handler(iterable_key, _handler)
+            c.register_handler(iterable_key, _handler, *pipe)
         return _handler
 
     return _deco
