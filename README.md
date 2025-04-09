@@ -41,18 +41,20 @@ Hello 👌!
 
 ## Usage
 
-Async `iterables` are sources, (async) `callables` are sinks.
+Slipstream components interoperate with basic python building blocks:
 
-Decorate handler functions using `handle`, then run `stream` to start processing:
+- `Any`-thing can be passed around as data
+- Any `Callable` may be used as a sink
+- `AsyncIterables` act as sources
+- Parallelize through `handle`
 
 <img src="https://raw.githubusercontent.com/menziess/slipstream/master/docs/source/_static/demo.gif" />
 
-Multiple sources and sinks can be provided to establish many-to-many relations between them.
-The 4 emoji's were printed using the callable `print`.
+By passing more than one source/sink, a many-to-many relation can be achieved between them.
 
 ## Quickstart
 
-Install `aiokafka` (latest) along with slipstream:
+Install Slipstream along with `aiokafka` (latest):
 
 ```sh
 pip install slipstream-async[kafka]
@@ -64,14 +66,14 @@ Spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), usin
 docker compose up broker -d
 ```
 
-Follow the docs and set up a Kafka connection: [slipstream.readthedocs.io](https://slipstream.readthedocs.io/en/latest/getting_started.html#kafka).
+Copy-paste this snippet: [slipstream.readthedocs.io](https://slipstream.readthedocs.io/en/latest/getting_started.html#kafka).
 
 ## Features
 
-- [`slipstream.handle`](slipstream/__init__.py): bind streams (iterables) and sinks (callables) to user defined handler functions
-- [`slipstream.stream`](slipstream/__init__.py): start streaming
-- [`slipstream.Topic`](slipstream/core.py): consume from (iterable), and produce to (callable) kafka using [**aiokafka**](https://aiokafka.readthedocs.io/en/stable/index.html)
-- [`slipstream.Cache`](slipstream/caching.py): store data to disk using [**rocksdict**](https://rocksdict.github.io/RocksDict/rocksdict.html)
-- [`slipstream.Conf`](slipstream/core.py): set global kafka configuration (can be overridden per topic)
-- [`slipstream.codecs.JsonCodec`](slipstream/codecs.py): serialize and deserialize json messages
-- [`slipstream.checkpointing.Checkpoint`](slipstream/checkpointing.py): recover from stream downtimes
+- [`slipstream.handle`](https://slipstream.readthedocs.io/en/latest/slipstream.html#slipstream.handle): bind streams (iterables) and sinks (callables) to user defined handler functions
+- [`slipstream.stream`](https://slipstream.readthedocs.io/en/latest/slipstream.html#slipstream.stream): start streaming
+- [`slipstream.Topic`](https://slipstream.readthedocs.io/en/latest/slipstream.html#slipstream.core.Topic): consume from (iterable), and produce to (callable) kafka using [**aiokafka**](https://aiokafka.readthedocs.io/en/stable/index.html)
+- [`slipstream.Cache`](https://slipstream.readthedocs.io/en/latest/slipstream.html#slipstream.Cache): store data to disk using [**rocksdict**](https://rocksdict.github.io/RocksDict/rocksdict.html)
+- [`slipstream.Conf`](https://slipstream.readthedocs.io/en/latest/slipstream.html#slipstream.Conf): set global kafka configuration (can be overridden per topic)
+- [`slipstream.codecs.JsonCodec`](https://slipstream.readthedocs.io/en/latest/autoapi/slipstream/codecs/index.html#slipstream.codecs.JsonCodec): serialize and deserialize json messages
+- [`slipstream.checkpointing.Checkpoint`](https://slipstream.readthedocs.io/en/latest/autoapi/slipstream/checkpointing/index.html#slipstream.checkpointing.Checkpoint): recover from stream downtimes
