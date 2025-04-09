@@ -50,7 +50,7 @@ Slipstream components interoperate with basic python building blocks:
 
 <img src="https://raw.githubusercontent.com/menziess/slipstream/master/docs/source/_static/demo.gif" />
 
-By passing more than one source/sink, a many-to-many relation can be achieved between them.
+A many-to-many relation is established by passing multiple sources / sinks.
 
 ## Quickstart
 
@@ -66,7 +66,7 @@ Spin up a local Kafka broker with [docker-compose.yml](docker-compose.yml), usin
 docker compose up broker -d
 ```
 
-Copy-paste this snippet: [slipstream.readthedocs.io](https://slipstream.readthedocs.io/en/latest/getting_started.html#kafka).
+Copy-paste [this snippet](https://slipstream.readthedocs.io/en/latest/getting_started.html#kafka).
 
 ## Features
 
