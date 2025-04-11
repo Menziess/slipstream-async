@@ -68,43 +68,51 @@ class PausableStream:
 
     def __init__(self, it: AsyncIterable[Any]):
         """Create instance that holds iterable and queue to pause it."""
-        self._it = it
+        self._iterable: AsyncIterable[Any] = it
+        self._iterator: AsyncIterator[Any] | None = None
         self.signal: Signal | Any = None
 
     def send_signal(self, signal: Signal | Any) -> None:
         """Send signal to stream."""
         self.signal = signal
 
-    async def __aiter__(self) -> AsyncIterator[Any]:
+    def __aiter__(self) -> AsyncIterator[Any]:
+        """Create iterator."""
+        if self._iterator is None:
+            if hasattr(self._iterable, 'asend'):
+                self._iterator = cast(
+                    AsyncGenerator[Any, Signal | Any],
+                    self._iterable
+                )
+            else:
+                self._iterator = aiter(self._iterable)
+        return self
+
+    async def __anext__(self) -> Any:
         """Consume iterator while it's not paused."""
-        if hasattr(self._it, 'asend'):
-            it = cast(AsyncGenerator[Any, Signal | Any], self._it)
+        it = self._iterator or self.__aiter__()
+
+        if hasattr(it, 'asend'):
+            async_gen = cast(AsyncGenerator[Any, Signal | Any], it)
+
             while True:
-                try:
-                    # The generator gets a chance to handle the signal
-                    msg = await it.asend(self.signal)
+                # The generator gets a chance to handle the signal
+                msg = await async_gen.asend(self.signal)
 
-                    # When the stream is paused and the generator handles
-                    # the signal, it should yield SENTINEL
-                    if msg is not Signal.SENTINEL:
+                # When the stream is paused and the generator handles
+                # the signal, it should yield SENTINEL
+                if msg is not Signal.SENTINEL:
 
-                        # Otherwise we assume that the generator does not
-                        # handle the pause, so we pause here
-                        while self.signal is Signal.PAUSE:
-                            await sleep(0.1)
-
-                        yield msg
-
-                except StopAsyncIteration:
-                    break
-        else:
-            async for msg in self._it:
-                yield msg
-                while True:
-                    if self.signal is Signal.PAUSE:
+                    # Otherwise we assume that the generator does not
+                    # handle the pause, so we pause here
+                    while self.signal is Signal.PAUSE:
                         await sleep(0.1)
-                    else:
-                        break
+                    return msg
+        else:
+            msg = await anext(it)
+            while self.signal is Signal.PAUSE:
+                await sleep(0.1)
+            return msg
 
 
 class Conf(metaclass=Singleton):
