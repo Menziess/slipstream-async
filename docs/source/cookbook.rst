@@ -52,11 +52,11 @@ Adding ``asyncio.sleep`` allows other coroutines to run during the delay.
 Source
 ^^^^^^
 
-As long as a data source can be turned into an ``AsyncIterable``, it can be used in :py:class:`slipstream.handle`.
+Any data source that can be turned into an ``AsyncIterable``, can be bound to a handler function.
 
 **Depends on:** `aiohttp <https://docs.aiohttp.org/en/stable/index.html>`_.
 
-For example, the Wikipedia recent changes streaming API:
+For example: the Wikipedia recent changes streaming API:
 
 ::
 
@@ -80,10 +80,61 @@ For example, the Wikipedia recent changes streaming API:
 
     run(stream())
 
+Sharing sources is efficient. But processing delays in one handler may delay consumption for both:
+
+::
+
+    wiki_changes = read_streaming_api(url)
+
+    @handle(wiki_changes)
+    def first_handler(msg):
+        pass
+
+    @handle(wiki_changes)
+    def second_handler(msg):
+        pass
+
+    run(stream())
+
+Pipe
+^^^^
+
+Use the ``pipe`` parameter in :py:class:`slipstream.handle` to transform the stream itself.
+
+**Depends on:** `asyncstdlib <https://asyncstdlib.readthedocs.io/en/latest/index.html>`_.
+
+::
+
+    from asyncio import run, sleep
+
+    from asyncstdlib import pairwise, accumulate
+
+    from slipstream import handle, stream
+
+    async def numbers(n=100):
+        for i in range(n):
+            await sleep(0.1)
+            yield i
+
+    @handle(numbers(), pipe=[pairwise], sink=[print])
+    def handler(pair):
+        yield pair
+
+    run(stream())
+
+::
+
+    # pipe=[pairwise]    # pipe=[accumulate]    # pipe=[accumulate, pairwise]
+    (0, 1)               0                      (0, 1)
+    (1, 2)               1                      (1, 3)
+    (2, 3)               3                      (3, 6)
+    (3, 4)               6                      (6, 10)
+    ...                  ...                    ...
+
 Sink
 ^^^^
 
-Any data sink that can be turned into a ``Callable`` can be used in combination with :py:class:`slipstream.handle`.
+Any data sink (such as Redis) that can be turned into a ``Callable`` can be used in :py:class:`slipstream.handle`.
 
 **Depends on:** `redis <https://redis.io/docs/latest/develop/clients/redis-py>`_.
 
