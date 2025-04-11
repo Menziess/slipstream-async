@@ -37,13 +37,11 @@ try:
 except ImportError:
     pass
 
-KAFKA_CONTAINER = 'confluentinc/cp-kafka:latest'
-
 
 @fixture(scope='session')
 def kafka():
     """Get running kafka broker."""
-    kafka = KafkaContainer(KAFKA_CONTAINER)
+    kafka = KafkaContainer().with_kraft()
     try:
         kafka.start()
         yield kafka.get_bootstrap_server()
