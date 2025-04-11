@@ -84,7 +84,7 @@ line-length = 79
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules"
+addopts = "--doctest-modules --cov=slipstream --cov-report=term-missing"
 doctest_optionflags = "ELLIPSIS"
 testpaths = [
   "slipstream",
