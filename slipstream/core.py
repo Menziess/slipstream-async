@@ -3,7 +3,6 @@
 import logging
 from asyncio import gather, sleep, wait_for
 from collections.abc import AsyncIterable
-from enum import Enum
 from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
@@ -23,6 +22,7 @@ from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import (
     AsyncCallable,
     PubSub,
+    Signal,
     Singleton,
     get_param_names,
     iscoroutinecallable,
@@ -39,7 +39,6 @@ except ImportError:
 __all__ = [
     'READ_FROM_START',
     'READ_FROM_END',
-    'Signal',
     'PausableStream',
     'Topic',
 ]
@@ -50,19 +49,6 @@ READ_FROM_END = -1
 
 
 _logger = logging.getLogger(__name__)
-
-
-class Signal(Enum):
-    """Signals can be exchanged with streams.
-
-    SENTINEL represents an absent yield value
-    PAUSE    represents the signal to pause stream
-    RESUME   represents the signal to resume stream
-    """
-
-    SENTINEL = 0
-    PAUSE = 1
-    RESUME = 2
 
 
 class PausableStream:

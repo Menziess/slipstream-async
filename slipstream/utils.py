@@ -1,6 +1,7 @@
 """Slipstream utilities."""
 
 from asyncio import Queue
+from enum import Enum
 from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
@@ -11,6 +12,20 @@ from typing import (
 )
 
 AsyncCallable: TypeAlias = Callable[..., Awaitable[Any]] | Callable[..., Any]
+
+
+class Signal(Enum):
+    """Signals can be exchanged with streams.
+
+    SENTINEL represents an absent yield value
+    PAUSE    represents the signal to pause stream
+    RESUME   represents the signal to resume stream
+    """
+
+    SENTINEL = 0
+    PAUSE = 1
+    RESUME = 2
+    STOP = 3
 
 
 def iscoroutinecallable(o: Any) -> bool:
