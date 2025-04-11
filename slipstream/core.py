@@ -21,6 +21,7 @@ from typing import (
 from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import (
     AsyncCallable,
+    AsyncSynchronizedGenerator,
     PubSub,
     Signal,
     Singleton,
@@ -181,9 +182,6 @@ class Conf(metaclass=Singleton):
             await gather(*[
                 self._distribute_messages(key, pausable_stream, kwargs)
                 for key, pausable_stream in self.iterables.items()
-            ], *[
-                self._pipe(self.pubsub.iter_topic(key), handler, *funcs)
-                for handler, (key, funcs) in self.pipes.items()
             ])
         except KeyboardInterrupt:
             pass
@@ -208,20 +206,35 @@ class Conf(metaclass=Singleton):
         kwargs: Any
     ):
         """Publish messages from stream."""
-        async for msg in pausable_stream:
-            await self.pubsub.apublish(key, msg, **kwargs)
+        async def _distribute(stream, kwargs):
+            async for msg in stream:
+                await self.pubsub.apublish(key, msg, **kwargs)
+
+        if piped_handlers := [
+            (handler, v[1])
+            for handler, v in self.pipes.items()
+            if v[0] == key
+        ]:
+            s = AsyncSynchronizedGenerator(pausable_stream)
+            await gather(_distribute(s, kwargs), *[
+                self._pipe(s.copy(), handler, *funcs, **kwargs)
+                for handler, funcs in piped_handlers
+            ])
+        else:
+            await _distribute(pausable_stream, kwargs)
 
     async def _pipe(
         self,
-        data: AsyncIterator,
+        stream: AsyncIterable,
         handler: AsyncCallable,
-        *funcs
+        *funcs,
+        **kwargs
     ):
         """Push stream through pipe before feeding it to the handler."""
         for func in funcs:
-            data = func(data)
-        async for val in data:
-            await handler(val)
+            stream = func(stream)
+        async for msg in stream:
+            await handler(msg, **kwargs)
 
     def __init__(self, conf: dict[str, Any] = {}) -> None:
         """Define init behavior."""
