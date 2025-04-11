@@ -5,7 +5,7 @@ description = "Streamline your stream processing."
 authors = [{ name = "Menziess", email = "stefan_schenk@hotmail.com" }]
 readme = "README.md"
 license = { text = "MIT" }
-keywords = ["kafka", "pubsub"]
+keywords = ["python", "streaming", "kafka", "stream-processing", "data-engineering", "dataflow", "data-processing", "streaming-data", "slipstream", "stateful-streaming"]
 classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
