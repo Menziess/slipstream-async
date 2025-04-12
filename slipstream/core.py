@@ -342,7 +342,7 @@ if aiokafka_available:
         ):
             """Seek to offset."""
             c = consumer or self.consumer
-            if not c:
+            if c is None:
                 raise RuntimeError('No consumer provided.')
 
             if isinstance(offset, int) and offset < READ_FROM_START:
