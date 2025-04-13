@@ -178,6 +178,7 @@ class _GeneratorCopy:
                 await self._cond.wait()
             if self._root._value is Signal.STOP:
                 raise StopAsyncIteration
-            self._is_ready = True
-            self._cond.notify_all()
-            return self._root._value
+            else:
+                self._is_ready = True
+                self._cond.notify_all()
+                return self._root._value
