@@ -122,9 +122,9 @@ class PubSub(metaclass=Singleton):
 class AsyncSynchronizedGenerator:
     """Async generator that synchronizes values across copies."""
 
-    def __init__(self, gen):
+    def __init__(self, gen: AsyncGenerator[Any, None]):
         """Create instance of synchronized async generator."""
-        self._gen: AsyncGenerator[Any] = gen
+        self._gen: AsyncGenerator[Any, None] = gen
         self._cond: Condition = Condition()
         self._value: Any | Signal = Signal.SENTINEL
         self._copies: list[_GeneratorCopy] = []
@@ -172,7 +172,9 @@ class _GeneratorCopy:
     async def __anext__(self) -> Any:
         """Return next value from root generator."""
         async with self._cond:
-            while self._root._value is Signal.SENTINEL or self._is_ready:
+            while self._root._value is Signal.SENTINEL or (
+                self._is_ready and self._root._value is not Signal.STOP
+            ):
                 await self._cond.wait()
             if self._root._value is Signal.STOP:
                 raise StopAsyncIteration
