@@ -3,7 +3,6 @@
 import logging
 from asyncio import gather, sleep, wait_for
 from collections.abc import AsyncIterable
-from enum import Enum
 from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
@@ -22,7 +21,9 @@ from typing import (
 from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import (
     AsyncCallable,
+    AsyncSynchronizedGenerator,
     PubSub,
+    Signal,
     Singleton,
     get_param_names,
     iscoroutinecallable,
@@ -39,7 +40,6 @@ except ImportError:
 __all__ = [
     'READ_FROM_START',
     'READ_FROM_END',
-    'Signal',
     'PausableStream',
     'Topic',
 ]
@@ -50,19 +50,6 @@ READ_FROM_END = -1
 
 
 _logger = logging.getLogger(__name__)
-
-
-class Signal(Enum):
-    """Signals can be exchanged with streams.
-
-    SENTINEL represents an absent yield value
-    PAUSE    represents the signal to pause stream
-    RESUME   represents the signal to resume stream
-    """
-
-    SENTINEL = 0
-    PAUSE = 1
-    RESUME = 2
 
 
 class PausableStream:
@@ -82,43 +69,51 @@ class PausableStream:
 
     def __init__(self, it: AsyncIterable[Any]):
         """Create instance that holds iterable and queue to pause it."""
-        self._it = it
+        self._iterable: AsyncIterable[Any] = it
+        self._iterator: AsyncIterator[Any] | None = None
         self.signal: Signal | Any = None
 
     def send_signal(self, signal: Signal | Any) -> None:
         """Send signal to stream."""
         self.signal = signal
 
-    async def __aiter__(self) -> AsyncIterator[Any]:
+    def __aiter__(self) -> AsyncIterator[Any]:
+        """Create iterator."""
+        if self._iterator is None:
+            if hasattr(self._iterable, 'asend'):
+                self._iterator = cast(
+                    AsyncGenerator[Any, Signal | Any],
+                    self._iterable
+                )
+            else:
+                self._iterator = aiter(self._iterable)
+        return self
+
+    async def __anext__(self) -> Any:
         """Consume iterator while it's not paused."""
-        if hasattr(self._it, 'asend'):
-            it = cast(AsyncGenerator[Any, Signal | Any], self._it)
+        it = self._iterator or self.__aiter__()
+
+        if hasattr(it, 'asend'):
+            async_gen = cast(AsyncGenerator[Any, Signal | Any], it)
+
             while True:
-                try:
-                    # The generator gets a chance to handle the signal
-                    msg = await it.asend(self.signal)
+                # The generator gets a chance to handle the signal
+                msg = await async_gen.asend(self.signal)
 
-                    # When the stream is paused and the generator handles
-                    # the signal, it should yield SENTINEL
-                    if msg is not Signal.SENTINEL:
+                # When the stream is paused and the generator handles
+                # the signal, it should yield SENTINEL
+                if msg is not Signal.SENTINEL:
 
-                        # Otherwise we assume that the generator does not
-                        # handle the pause, so we pause here
-                        while self.signal is Signal.PAUSE:
-                            await sleep(0.1)
-
-                        yield msg
-
-                except StopAsyncIteration:
-                    break
-        else:
-            async for msg in self._it:
-                yield msg
-                while True:
-                    if self.signal is Signal.PAUSE:
+                    # Otherwise we assume that the generator does not
+                    # handle the pause, so we pause here
+                    while self.signal is Signal.PAUSE:
                         await sleep(0.1)
-                    else:
-                        break
+                    return msg
+        else:
+            msg = await anext(it)
+            while self.signal is Signal.PAUSE:
+                await sleep(0.1)
+            return msg
 
 
 class Conf(metaclass=Singleton):
@@ -151,6 +146,7 @@ class Conf(metaclass=Singleton):
 
     pubsub = PubSub()
     iterables: dict[str, PausableStream] = {}
+    pipes: dict[AsyncCallable, tuple[str, tuple[AsyncCallable, ...]]] = {}
     exit_hooks: set[AsyncCallable] = set()
 
     def register_iterable(
@@ -164,10 +160,14 @@ class Conf(metaclass=Singleton):
     def register_handler(
         self,
         key: str,
-        handler: AsyncCallable
+        handler: AsyncCallable,
+        *pipe: AsyncCallable
     ):
         """Add handler to global Conf."""
-        self.pubsub.subscribe(key, handler)
+        if pipe:
+            self.pipes[handler] = (key, pipe)
+        else:
+            self.pubsub.subscribe(key, handler)
 
     def register_exit_hook(
         self,
@@ -206,8 +206,35 @@ class Conf(metaclass=Singleton):
         kwargs: Any
     ):
         """Publish messages from stream."""
-        async for msg in pausable_stream:
-            await self.pubsub.apublish(key, msg, **kwargs)
+        async def _distribute(stream, kwargs):
+            async for msg in stream:
+                await self.pubsub.apublish(key, msg, **kwargs)
+
+        if piped_handlers := [
+            (handler, v[1])
+            for handler, v in self.pipes.items()
+            if v[0] == key
+        ]:
+            s = AsyncSynchronizedGenerator(pausable_stream)
+            await gather(_distribute(s, kwargs), *[
+                self._pipe(s.copy(), handler, *funcs, **kwargs)
+                for handler, funcs in piped_handlers
+            ])
+        else:
+            await _distribute(pausable_stream, kwargs)
+
+    async def _pipe(
+        self,
+        stream: AsyncIterable,
+        handler: AsyncCallable,
+        *funcs,
+        **kwargs
+    ):
+        """Push stream through pipe before feeding it to the handler."""
+        for func in funcs:
+            stream = func(stream)
+        async for msg in stream:
+            await handler(msg, **kwargs)
 
     def __init__(self, conf: dict[str, Any] = {}) -> None:
         """Define init behavior."""
@@ -315,7 +342,7 @@ if aiokafka_available:
         ):
             """Seek to offset."""
             c = consumer or self.consumer
-            if not c:
+            if c is None:
                 raise RuntimeError('No consumer provided.')
 
             if isinstance(offset, int) and offset < READ_FROM_START:
@@ -461,6 +488,9 @@ if aiokafka_available:
                         signal = yield msg
 
                         if signal is Signal.PAUSE:
+                            # Future calls to `getmany` will not return
+                            # any records from these partitions until
+                            # they have been resumed using `resume`
                             consumer.pause(*consumer.assignment())
                             _logger.debug(f'{self.name} paused')
                             while True:
@@ -470,9 +500,9 @@ if aiokafka_available:
                                     consumer.resume(*consumer.assignment())
                                     break
 
-                                # Send heartbeats through getmany
+                                # Send heartbeats through `getmany`
                                 await consumer.getmany()
-                                await sleep(1)
+                                await sleep(3)
 
                 except Exception as e:
                     _logger.error(
@@ -557,6 +587,7 @@ async def _sink_output(
 
 def handle(
     *iterable: AsyncIterable[Any],
+    pipe: Iterable[AsyncCallable] = [],
     sink: Iterable[Callable | AsyncCallable] = []
 ):
     """Snaps function to stream.
@@ -610,7 +641,7 @@ def handle(
         for it in iterable:
             iterable_key = str(id(it))
             c.register_iterable(iterable_key, it)
-            c.register_handler(iterable_key, _handler)
+            c.register_handler(iterable_key, _handler, *pipe)
         return _handler
 
     return _deco

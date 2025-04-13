@@ -11,16 +11,16 @@ Slipstream provides a data-flow model to simplify development of stateful stream
 - **Freedom:** allowing arbitrary code free of limiting abstractions
 - **Speed:** optimized and configurable defaults to get started quickly
 
-Consume data from any ``Async Iterable`` source: Kafka, Streaming API's, Python generators, Cache updates.
-Produce data to any ``Callable``: Kafka, RocksDB, API's, Databases.
-Perform any arbitrary stateful operation using regular Python code: Joining, Aggregating, Filtering.
-Detect and handle dependency stream downtimes: Pausing, Catching up, Resuming, and Correcting.
+Consume any ``AsyncIterable`` source: *Kafka, Streaming API's, Python generators, Cache updates*.
+Produce to any ``Callable``: *Kafka, RocksDB, API's, Databases*.
+Perform any arbitrary stateful operation using regular Python code: *filters, joins, aggregations, pairwise* or *batching*.
+Detect and handle dependency stream downtimes: *pausing, catching up, resuming*, and *making corrections*.
 
 Demo
 ^^^^
 
-Because everything is built with basic python building blocks, framework-like features can be crafted with ease.
-For instance, while timers aren't included, you can whip one up effortlessly:
+Slipstream components interoperate with basic python building blocks, making it easy to craft framework-like features.
+For instance, while timers aren't included, you can whip one up effortlessly (``AsyncIterable``):
 
 ::
 
@@ -31,13 +31,13 @@ For instance, while timers aren't included, you can whip one up effortlessly:
             await sleep(interval)
             yield
 
-We'll use ``print`` as our sink:
+We'll use ``print`` as our sink (``Callable``):
 
 .. code-block:: python
 
     print
 
-Let's send our mascot 🐟 *-- blub* downstream on a regular 1 second interval:
+Let's send our mascot "🐟 *-- blub*" downstream:
 
 ::
 

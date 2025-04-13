@@ -5,7 +5,7 @@ import pytest
 from conftest import emoji
 
 from slipstream import Conf
-from slipstream.core import Topic, _sink_output
+from slipstream.core import Topic, _sink_output, handle, stream
 
 
 @pytest.mark.asyncio
@@ -117,3 +117,37 @@ async def test_sink_output(mocker):
     await _sink_output(src, async_f, (1, 2))
     stub.assert_called_once_with((1, 2))
     stub.reset_mock()
+
+
+@pytest.mark.asyncio
+async def test_handle(mocker):
+    """Should decorate handler and register iterables, handlers, pipes."""
+
+    async def number():
+        yield {'val': 123}
+
+    source = number()
+
+    async def pipe(s):
+        async for _ in s:
+            yield _['val']
+
+    async def handler(msg, **_):
+        return msg
+
+    sink = mocker.AsyncMock()
+
+    handle(
+        source,
+        pipe=[pipe],
+        sink=[sink]
+    )(handler)
+
+    c = Conf()
+    it_key = str(id(source))
+    assert c.iterables[it_key]._iterable == source
+    assert list(c.pipes.items())[0][1] == (it_key, (pipe,))
+
+    await stream()
+
+    sink.assert_called_once_with(123)

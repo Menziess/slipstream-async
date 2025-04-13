@@ -1,9 +1,11 @@
 """Slipstream utilities."""
 
-from asyncio import Queue
+from asyncio import Condition, Queue
+from enum import Enum
 from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
+    AsyncIterable,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -11,6 +13,20 @@ from typing import (
 )
 
 AsyncCallable: TypeAlias = Callable[..., Awaitable[Any]] | Callable[..., Any]
+
+
+class Signal(Enum):
+    """Signals can be exchanged with streams.
+
+    SENTINEL represents an absent yield value
+    PAUSE    represents the signal to pause stream
+    RESUME   represents the signal to resume stream
+    """
+
+    SENTINEL = 0
+    PAUSE = 1
+    RESUME = 2
+    STOP = 3
 
 
 def iscoroutinecallable(o: Any) -> bool:
@@ -101,3 +117,68 @@ class PubSub(metaclass=Singleton):
                 yield await queue.get()
         finally:
             self.unsubscribe(topic, queue.put_nowait)
+
+
+class AsyncSynchronizedGenerator:
+    """Async generator that synchronizes values across copies."""
+
+    def __init__(self, gen: AsyncIterable[Any]):
+        """Create instance of synchronized async generator."""
+        self._iterator: AsyncIterator[Any] = aiter(gen)
+        self._cond: Condition = Condition()
+        self._value: Any | Signal = Signal.SENTINEL
+        self._copies: list[_GeneratorCopy] = []
+
+    def __aiter__(self) -> AsyncIterator[Any]:
+        """Return self as iterator."""
+        return self
+
+    async def __anext__(self) -> Any:
+        """Return next value from generator if copies are ready."""
+        async with self._cond:
+            while any(not copy._is_ready for copy in self._copies):
+                await self._cond.wait()
+            try:
+                self._value = await self._iterator.__anext__()
+                for copy in self._copies:
+                    copy._is_ready = False
+            except StopAsyncIteration:
+                self._value = Signal.STOP
+                self._cond.notify_all()
+                raise StopAsyncIteration
+            self._cond.notify_all()
+            return self._value
+
+    def copy(self) -> '_GeneratorCopy':
+        """Create a synchronized copy of this generator."""
+        copy = _GeneratorCopy(self, self._cond)
+        self._copies.append(copy)
+        return copy
+
+
+class _GeneratorCopy:
+    """Synchronized copy of an async generator."""
+
+    def __init__(self, root: AsyncSynchronizedGenerator, cond: Condition):
+        """Create copy of synchronized async generator."""
+        self._root: AsyncSynchronizedGenerator = root
+        self._cond: Condition = cond
+        self._is_ready: bool = True
+
+    def __aiter__(self) -> AsyncIterator[Any]:
+        """Return self as iterator."""
+        return self
+
+    async def __anext__(self) -> Any:
+        """Return next value from root generator."""
+        async with self._cond:
+            while self._root._value is Signal.SENTINEL or (
+                self._is_ready and self._root._value is not Signal.STOP
+            ):
+                await self._cond.wait()
+            if self._root._value is Signal.STOP:
+                raise StopAsyncIteration
+            else:
+                self._is_ready = True
+                self._cond.notify_all()
+                return self._root._value

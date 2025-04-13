@@ -37,13 +37,11 @@ try:
 except ImportError:
     pass
 
-KAFKA_CONTAINER = 'confluentinc/cp-kafka:latest'
-
 
 @fixture(scope='session')
 def kafka():
     """Get running kafka broker."""
-    kafka = KafkaContainer(KAFKA_CONTAINER)
+    kafka = KafkaContainer().with_kraft()
     try:
         kafka.start()
         yield kafka.get_bootstrap_server()
@@ -59,10 +57,11 @@ def timeout():
         def raise_timeout(*_):
             raise TimeoutError(f'Timeout reached: {seconds}.')
 
-        def start_timeout():
-            signal.signal(signal.SIGALRM, raise_timeout)
-            signal.alarm(seconds)
-        yield start_timeout()
+        signal.signal(signal.SIGALRM, raise_timeout)
+        signal.alarm(seconds)
+
+        yield
+
     return set_timeout
 
 
