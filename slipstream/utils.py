@@ -5,7 +5,7 @@ from enum import Enum
 from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
-    AsyncGenerator,
+    AsyncIterable,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -122,9 +122,9 @@ class PubSub(metaclass=Singleton):
 class AsyncSynchronizedGenerator:
     """Async generator that synchronizes values across copies."""
 
-    def __init__(self, gen: AsyncGenerator[Any, None]):
+    def __init__(self, gen: AsyncIterable[Any]):
         """Create instance of synchronized async generator."""
-        self._gen: AsyncGenerator[Any, None] = gen
+        self._iterator: AsyncIterator[Any] = aiter(gen)
         self._cond: Condition = Condition()
         self._value: Any | Signal = Signal.SENTINEL
         self._copies: list[_GeneratorCopy] = []
@@ -139,7 +139,7 @@ class AsyncSynchronizedGenerator:
             while any(not copy._is_ready for copy in self._copies):
                 await self._cond.wait()
             try:
-                self._value = await self._gen.__anext__()
+                self._value = await self._iterator.__anext__()
                 for copy in self._copies:
                     copy._is_ready = False
             except StopAsyncIteration:
