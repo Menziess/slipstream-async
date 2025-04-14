@@ -590,7 +590,7 @@ def handle(
     pipe: Iterable[AsyncCallable] = [],
     sink: Iterable[Callable | AsyncCallable] = []
 ):
-    """Snaps function to stream.
+    """Bind sources and sinks to the handler function.
 
     Ex:
         >>> topic = Topic('demo')                 # doctest: +SKIP
@@ -648,13 +648,13 @@ def handle(
 
 
 def stream(**kwargs: Any):
-    """Start the streams.
+    """Start processing iterables bound by `handle` function.
 
     Ex:
         >>> from asyncio import run
-        >>> args = {
+        >>> kwargs = {
         ...     'env': 'DEV',
         ... }
-        >>> run(stream(**args))                   # doctest: +SKIP
+        >>> run(stream(**kwargs))                 # doctest: +SKIP
     """
     return Conf().start(**kwargs)
