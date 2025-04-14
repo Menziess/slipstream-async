@@ -34,7 +34,7 @@ aiokafka_available = False
 try:
     import aiokafka  # noqa: F401  # ruff: noqa # pyright: ignore
     aiokafka_available = True
-except ImportError:
+except ImportError:  # pragma: no cover
     pass
 
 __all__ = [

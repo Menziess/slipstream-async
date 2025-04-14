@@ -22,7 +22,7 @@ rocksdict_available = False
 try:
     import rocksdict  # noqa: F401  # ruff: noqa # pyright: ignore
     rocksdict_available = True
-except ImportError:
+except ImportError:   # pragma: no cover
     pass
 
 __all__ = [

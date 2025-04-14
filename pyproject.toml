@@ -84,18 +84,19 @@ line-length = 79
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --cov=slipstream --cov-report=term-missing"
-doctest_optionflags = "ELLIPSIS"
+addopts = '--doctest-modules --cov=slipstream --cov-report=term-missing'
+doctest_optionflags = 'ELLIPSIS'
 testpaths = [
-  "slipstream",
-  "tests",
+  'slipstream',
+  'tests',
 ]
 markers = [
-  "serial"
+  'serial'
 ]
-asyncio_default_fixture_loop_scope = "function"
+asyncio_default_fixture_loop_scope = 'function'
 
 [tool.coverage.report]
 exclude_lines = [
-  "raise NotImplementedError"
+  '@(abc\.)?abstractmethod',
+  'pragma: no cover',
 ]
