@@ -11,6 +11,8 @@ from typing import (
     TypeVar,
 )
 
+from rocksdict import WriteBatch
+
 from slipstream.interfaces import ICache, Key
 
 rocksdict_available = False
@@ -48,7 +50,13 @@ if rocksdict_available:
         Snapshot,
         WriteOptions,
     )
-    from rocksdict.rocksdict import RdictItems, RdictKeys, RdictValues
+    from rocksdict.rocksdict import (
+        RdictColumns,
+        RdictEntities,
+        RdictItems,
+        RdictKeys,
+        RdictValues,
+    )
 
     class Cache(ICache):
         """Create a RocksDB database in the specified folder.
@@ -273,6 +281,24 @@ if rocksdict_available:
             """Get values."""
             return self.db.values(backwards, from_key, read_opt)
 
+        def columns(
+            self,
+            backwards: bool = False,
+            from_key: Key | None = None,
+            read_opt: ReadOptions | None = None
+        ) -> RdictColumns:
+            """Get values as widecolumns."""
+            return self.db.columns(backwards, from_key, read_opt)
+
+        def entities(
+            self,
+            backwards: bool = False,
+            from_key: Key | None = None,
+            read_opt: ReadOptions | None = None
+        ) -> RdictEntities:
+            """Get keys and entities."""
+            return self.db.entities(backwards, from_key, read_opt)
+
         def ingest_external_file(
             self,
             paths: list[str],
@@ -334,6 +360,22 @@ if rocksdict_available:
             """Get sequence number of the most recent transaction."""
             return self.db.latest_sequence_number()
 
+        def try_catch_up_with_primary(self) -> None:
+            """Try to catch up with the primary by reading log files."""
+            self.db.try_catch_up_with_primary()
+
+        def cancel_all_background(self, wait: bool = True) -> None:
+            """Request stopping background work."""
+            self.db.cancel_all_background(wait)
+
+        def list_cf(
+            self,
+            path: str,
+            options: Options = Options()
+        ) -> list[str]:
+            """List column families."""
+            return self.db.list_cf(path, options)
+
         def live_files(self) -> list[dict[str, Any]]:
             """Get list of all table files with their level, start/end key."""
             return self.db.live_files()
@@ -351,6 +393,14 @@ if rocksdict_available:
             """Flush memory to disk, and drop the current column family."""
             return self.db.close()
 
+        def write(
+            self,
+            write_batch: WriteBatch,
+            write_opt: WriteOptions | None = None
+        ) -> None:
+            """Write a batch."""
+            self.db.write(write_batch, write_opt)
+
         def flush(self, wait: bool = True) -> None:
             """Manually flush the current column family."""
             return self.db.flush(wait)
@@ -358,6 +408,10 @@ if rocksdict_available:
         def flush_wal(self, sync: bool = True) -> None:
             """Manually flush the WAL buffer."""
             return self.db.flush_wal(sync)
+
+        def repair(self, path: str, options: Options = Options()) -> None:
+            """Repair the database."""
+            self.db.repair(path, options)
 
         def destroy(self, options: Options = Options()) -> None:
             """Delete the database."""
