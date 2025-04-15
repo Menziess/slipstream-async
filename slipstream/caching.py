@@ -7,10 +7,6 @@ from types import TracebackType
 from typing import (
     Any,
     Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
     Type,
     TypeVar,
 )
@@ -69,8 +65,8 @@ if rocksdict_available:
         def __init__(
             self,
             path: str,
-            options: Optional[Options] = None,
-            column_families: Dict[str, Options] | None = None,
+            options: Options | None = None,
+            column_families: dict[str, Options] | None = None,
             access_type: AccessType = AccessType.read_write(),
             target_table_size: int = 25 * MB,
             number_of_locks: int = 16
@@ -166,9 +162,9 @@ if rocksdict_available:
 
         def __exit__(
             self,
-            exc_type: Optional[Type[BaseException]],
-            exc_val: Optional[BaseException],
-            exc_tb: Optional[TracebackType]
+            exc_type: Type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: TracebackType | None
         ) -> None:
             """Exit contextmanager."""
             self.close()
@@ -198,6 +194,15 @@ if rocksdict_available:
             """Get item from database by key."""
             return self.db.get(key, default, read_opt)
 
+        def get_entity(
+            self,
+            key: Key | list[Key],
+            default: Any = None,
+            read_opt: ReadOptions | None = None
+        ) -> list[tuple[Any, Any]] | None:
+            """Get wide-column from database by key."""
+            return self.db.get_entity(key, default, read_opt)
+
         def put(
             self,
             key: Key,
@@ -206,6 +211,16 @@ if rocksdict_available:
         ) -> None:
             """Put item in database using key."""
             return self.db.put(key, value, write_opt)
+
+        def put_entity(
+            self,
+            key: Key,
+            names: list[Any],
+            values: list[Any],
+            write_opt: WriteOptions | None = None
+        ) -> None:
+            """Put wide-column in database using key."""
+            return self.db.put_entity(key, names, values, write_opt)
 
         def delete(
             self,
@@ -219,8 +234,8 @@ if rocksdict_available:
             self,
             key: Key,
             fetch: bool = False,
-            read_opt: Optional[ReadOptions] = None
-        ) -> bool | Tuple[bool, Any]:
+            read_opt: ReadOptions | None = None
+        ) -> bool | tuple[bool, Any]:
             """Check if a key exist without performing IO operations."""
             return self.db.key_may_exist(key, fetch, read_opt)
 
@@ -252,15 +267,15 @@ if rocksdict_available:
         def values(
             self,
             backwards: bool = False,
-            from_key: Optional[Key] = None,
-            read_opt: Optional[ReadOptions] = None
+            from_key: Key | None = None,
+            read_opt: ReadOptions | None = None
         ) -> RdictValues:
             """Get values."""
             return self.db.values(backwards, from_key, read_opt)
 
         def ingest_external_file(
             self,
-            paths: List[str],
+            paths: list[str],
             opts: IngestExternalFileOptions = IngestExternalFileOptions()
         ) -> None:
             """Load list of SST files into current column family."""
@@ -303,7 +318,7 @@ if rocksdict_available:
             """Get current database path."""
             return self.db.path()
 
-        def set_options(self, options: Dict[str, str]) -> None:
+        def set_options(self, options: dict[str, str]) -> None:
             """Set options for current column family."""
             return self.db.set_options(options)
 
@@ -319,14 +334,14 @@ if rocksdict_available:
             """Get sequence number of the most recent transaction."""
             return self.db.latest_sequence_number()
 
-        def live_files(self) -> List[Dict[str, Any]]:
+        def live_files(self) -> list[dict[str, Any]]:
             """Get list of all table files with their level, start/end key."""
             return self.db.live_files()
 
         def compact_range(
             self,
-            begin: Optional[Key],
-            end: Optional[Key],
+            begin: Key | None,
+            end: Key | None,
             compact_opt: CompactOptions = CompactOptions()
         ) -> None:
             """Run manual compaction on range for the current column family."""
