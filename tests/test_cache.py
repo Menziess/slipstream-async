@@ -2,6 +2,9 @@ from asyncio import gather, sleep
 from typing import AsyncIterable, Callable
 
 import pytest
+from rocksdict import DbClosedError
+
+from slipstream.caching import Cache
 
 
 @pytest.mark.serial
@@ -14,11 +17,30 @@ import pytest
 def test_crud(key, val, updated, cache):
     """Test create/read/update/delete."""
     cache[key] = val
+    assert key in cache
     assert cache[key] == val
     cache[key] = updated
     assert cache[key] == updated
     del cache[key]
     assert cache[key] is None
+
+
+def test_contextmanager_cache():
+    """Should automatically close cache after use."""
+    key, val = 'x', 'y'
+    cache = Cache('tests/db')
+    try:
+        with cache as c:
+            c[key] = val
+            assert key in cache
+            assert cache[key] == val
+            del cache[key]
+            assert cache[key] is None
+
+        with pytest.raises(DbClosedError):
+            cache[key]
+    finally:
+        cache.destroy()
 
 
 def test_get_callable(cache):
