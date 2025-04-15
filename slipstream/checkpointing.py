@@ -377,17 +377,13 @@ class Checkpoint:
         """Get dependency from dependencies."""
         return self.dependencies[key]
 
-    def __iter__(self):
-        """Get relevant values when dict is called."""
-        yield from ({
+    def __repr__(self) -> str:
+        """Represent checkpoint."""
+        return str({
             STATE_NAME: self.state,
             STATE_MARKER_NAME: self.state_marker,
             CHECKPOINTS_NAME: {
                 dependency.name: dict(dependency)
                 for dependency in self.dependencies.values()
             }
-        }.items())
-
-    def __repr__(self) -> str:
-        """Represent checkpoint."""
-        return str(dict(self))
+        })

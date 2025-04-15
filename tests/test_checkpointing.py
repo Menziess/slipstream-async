@@ -55,9 +55,14 @@ def test_dependency_save_and_load(mock_cache, dependency):
 async def test_default_downtime_check(dependency):
     """Should check for datetime diff surpassing threshold."""
     checkpoint = Checkpoint('test', iterable_to_async([]), [dependency])
+
+    with pytest.raises(ValueError):
+        checkpoint.state_marker = 'not-datetime'
+        dependency.checkpoint_marker = 'not-datetime'
+        dependency._default_downtime_check(checkpoint, dependency)
+
     checkpoint.state_marker = datetime(2025, 1, 1, 11)
     dependency.checkpoint_marker = datetime(2025, 1, 1, 10)
-
     downtime = dependency._default_downtime_check(checkpoint, dependency)
     assert isinstance(downtime, timedelta)
     assert downtime == timedelta(hours=1)
@@ -67,9 +72,14 @@ async def test_default_downtime_check(dependency):
 async def test_default_recovery_check(dependency):
     """Should check surpassing datetime is true."""
     checkpoint = Checkpoint('test', iterable_to_async([]), [dependency])
+
+    with pytest.raises(ValueError):
+        checkpoint.state_marker = 'not-datetime'
+        dependency.checkpoint_marker = 'not-datetime'
+        dependency._default_recovery_check(checkpoint, dependency)
+
     checkpoint.state_marker = datetime(2025, 1, 1, 10)
     dependency.checkpoint_marker = datetime(2025, 1, 1, 11)
-
     recovered = dependency._default_recovery_check(checkpoint, dependency)
     assert recovered is True
 
@@ -88,6 +98,9 @@ async def test_heartbeat_single_dependency(checkpoint):
     """Should correctly update dependency data."""
     marker = datetime(2025, 1, 1, 10, 30)
     await checkpoint.heartbeat(marker)
+
+    with pytest.raises(KeyError):
+        await checkpoint.heartbeat(marker, 'not-existing')
 
     dep = checkpoint['dependency']
     assert dep.checkpoint_marker == marker
@@ -186,11 +199,17 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
     mock_iterable.send_signal.assert_called_with(Signal.RESUME)
 
 
+@pytest.mark.parametrize('is_async', [True, False])
 @pytest.mark.asyncio
-async def test_custom_callbacks(checkpoint, mocker):
+async def test_custom_callbacks(is_async, checkpoint, mocker):
     """Check custom callbacks properly called."""
-    downtime_callback = mocker.AsyncMock()
-    recovery_callback = mocker.AsyncMock()
+    if is_async:
+        downtime_callback = mocker.AsyncMock()
+        recovery_callback = mocker.AsyncMock()
+    else:
+        downtime_callback = mocker.Mock()
+        recovery_callback = mocker.Mock()
+
     checkpoint._downtime_callback = downtime_callback
     checkpoint._recovery_callback = recovery_callback
 
@@ -204,3 +223,8 @@ async def test_custom_callbacks(checkpoint, mocker):
     await checkpoint.heartbeat(datetime(2025, 1, 1, 11, 1))
     recovery_callback.assert_called_once_with(
         checkpoint, checkpoint['dependency'])
+
+
+def test_repr(checkpoint):
+    """Should print representation without crashing."""
+    assert str(checkpoint)
