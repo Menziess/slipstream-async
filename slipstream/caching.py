@@ -193,24 +193,6 @@ if rocksdict_available:
             """Set custom write options."""
             return self.db.set_write_options(write_opt)
 
-        def get(
-            self,
-            key: Key | list[Key],
-            default: T = None,
-            read_opt: ReadOptions | None = None
-        ) -> Any | T:
-            """Get item from database by key."""
-            return self.db.get(key, default, read_opt)
-
-        def get_entity(
-            self,
-            key: Key | list[Key],
-            default: Any = None,
-            read_opt: ReadOptions | None = None
-        ) -> list[tuple[Any, Any]] | None:
-            """Get wide-column from database by key."""
-            return self.db.get_entity(key, default, read_opt)
-
         def put(
             self,
             key: Key,
@@ -220,6 +202,15 @@ if rocksdict_available:
             """Put item in database using key."""
             return self.db.put(key, value, write_opt)
 
+        def get(
+            self,
+            key: Key | list[Key],
+            default: T = None,
+            read_opt: ReadOptions | None = None
+        ) -> Any | T:
+            """Get item from database by key."""
+            return self.db.get(key, default, read_opt)
+
         def put_entity(
             self,
             key: Key,
@@ -227,8 +218,24 @@ if rocksdict_available:
             values: list[Any],
             write_opt: WriteOptions | None = None
         ) -> None:
-            """Put wide-column in database using key."""
+            """Put wide-column in database using key.
+
+            >>> cache.put_entity('key', ['a', 'b'], [1, 2])  # doctest: +SKIP
+            """
             return self.db.put_entity(key, names, values, write_opt)
+
+        def get_entity(
+            self,
+            key: Key | list[Key],
+            default: Any = None,
+            read_opt: ReadOptions | None = None
+        ) -> list[tuple[Any, Any]] | None:
+            """Get wide-column from database by key.
+
+            >>> cache.get_entity('key')  # doctest: +SKIP
+            [('a', 1), ('b', 2)]
+            """
+            return self.db.get_entity(key, default, read_opt)
 
         def delete(
             self,
