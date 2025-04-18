@@ -1,84 +1,101 @@
 [project]
-name = "slipstream-async"
-dynamic = ["version"]
-description = "Streamline your stream processing."
-authors = [{ name = "Menziess", email = "stefan_schenk@hotmail.com" }]
-readme = "README.md"
-license = { text = "MIT" }
-keywords = ["python", "streaming", "kafka", "stream-processing", "data-engineering", "dataflow", "data-processing", "streaming-data", "slipstream", "stateful-streaming"]
+name = 'slipstream-async'
+dynamic = ['version']
+description = 'Streamline your stream processing.'
+authors = [{ name = 'Menziess', email = 'stefan_schenk@hotmail.com' }]
+readme = 'README.md'
+license = { text = 'MIT' }
+keywords = ['python', 'streaming', 'kafka', 'stream-processing', 'data-engineering', 'dataflow', 'data-processing', 'streaming-data', 'slipstream', 'stateful-streaming']
 classifiers = [
-    "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
-    "Topic :: Scientific/Engineering",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    'Intended Audience :: Developers',
+    'Intended Audience :: Science/Research',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'License :: OSI Approved :: MIT License',
+    'Topic :: Scientific/Engineering',
+    'Topic :: Scientific/Engineering :: Artificial Intelligence',
 ]
-requires-python = ">=3.10"
+requires-python = '>=3.10'
 dependencies = []
 
 [project.optional-dependencies]
 kafka = [
-  "aiokafka",
+  'aiokafka',
 ]
 cache = [
-  "rocksdict",
+  'rocksdict',
 ]
 dev = [
-  "pydocstyle",
-  "autopep8",
-  "pyright",
-  "flake8",
-  "bandit",
-  "pre-commit",
+  'pre-commit',
+  'pyright',
+  'bandit',
+  'ruff',
 ]
 test = [
-  "pytest",
-  "pytest-cov",
-  "pytest-mock",
-  "pytest-asyncio",
-  "testcontainers[kafka]",
+  'pytest',
+  'pytest-cov',
+  'pytest-mock',
+  'pytest-asyncio',
+  'testcontainers[kafka]',
 ]
 docs = [
-  "sphinx",
-  "furo",
-  "sphinx-autoapi",
-  "sphinx-autobuild",
+  'sphinx',
+  'furo',
+  'sphinx-autoapi',
+  'sphinx-autobuild',
 ]
 
 [project.urls]
-repository = "https://github.com/Menziess/slipstream"
-documentation = "https://slipstream.readthedocs.io"
-
-[project.scripts]
-slipstream = "slipstream.__main__:main"
+repository = 'https://github.com/Menziess/slipstream'
+documentation = 'https://slipstream.readthedocs.io'
 
 [tool.setuptools.dynamic]
-version = {attr = "slipstream.__version__.VERSION"}
+version = {attr = 'slipstream.__version__.VERSION'}
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["slipstream*"]
+where = ['.']
+include = ['slipstream*']
 
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ['setuptools']
+build-backend = 'setuptools.build_meta'
 
 [tool.pyright]
-venvPath = "."
-venv = ".venv"
+venvPath = '.'
+venv = '.venv'
 include = [
-  "slipstream/**/*.py",
-  "tests/**/*.py"
+  'slipstream/**/*.py',
+  'tests/**/*.py'
 ]
 
 [tool.bandit]
-exclude_dirs = ["tests"]
+exclude_dirs = ['tests']
 
 [tool.ruff]
 line-length = 79
+target-version = 'py310'
+
+[tool.ruff.lint]
+extend-select = [
+  'E',
+  'W',
+  'Q',
+  'D',
+  'UP',
+  'D401',
+]
+
+[tool.ruff.format]
+quote-style = 'single'
+docstring-code-format = true
+
+[tool.ruff.lint.pydocstyle]
+convention = 'google'
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = 'single'
+docstring-quotes = 'double'
 
 [tool.mypy]
 ignore_missing_imports = true

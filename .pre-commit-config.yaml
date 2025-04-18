@@ -3,17 +3,14 @@ repos:
     rev: v1.1.399
     hooks:
       - id: pyright
-  - repo: https://github.com/pycqa/pydocstyle
-    rev: 6.3.0
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.6
     hooks:
-      - id: pydocstyle
+      - id: ruff
+      - id: ruff-format
   - repo: https://github.com/pycqa/bandit
     rev: 1.8.3
     hooks:
       - id: bandit
         args: ["-c", "pyproject.toml", "-r"]
         additional_dependencies: [".[toml]"]
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.2.0
-    hooks:
-      - id: flake8
