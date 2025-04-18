@@ -1,3 +1,4 @@
+"""Interfaces tests."""
 
 from asyncio import gather
 from typing import Any
@@ -9,8 +10,8 @@ from slipstream.interfaces import ICache, ICodec, Key
 
 def test_ICodec():
     """Should be usable as interface."""
-    class Codec(ICodec):
 
+    class Codec(ICodec):
         def encode(self, obj: Any):
             return str(obj).encode()
 
@@ -26,8 +27,8 @@ def test_ICodec():
 @pytest.mark.asyncio
 async def test_ICache():
     """Should be usable as interface."""
-    class Cache(ICache):
 
+    class Cache(ICache):
         def __init__(self):
             self.db = {}
 

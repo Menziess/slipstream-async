@@ -1,5 +1,7 @@
+"""Core tests."""
+
 import logging
-from typing import AsyncIterable, Callable
+from collections.abc import AsyncIterable, Callable
 
 import pytest
 from conftest import emoji
@@ -27,6 +29,7 @@ async def test_Conf(mocker):
 
     async def handler(msg, **kwargs):
         stub(msg, kwargs)
+
     c.register_handler(iterable_key, handler)
 
     # Start distributing messages and confirm message was received
@@ -55,8 +58,7 @@ def test_get_callable():
 async def test_call_fail(mocker, caplog):
     """Should fail to produce message and log an error."""
     mock_producer = mocker.patch(
-        'slipstream.core.AIOKafkaProducer',
-        autospec=True
+        'slipstream.core.AIOKafkaProducer', autospec=True
     ).return_value
     mock_producer.send_and_wait = mocker.AsyncMock(
         side_effect=RuntimeError('')
@@ -69,10 +71,7 @@ async def test_call_fail(mocker, caplog):
         await t(key, value)
 
     mock_producer.send_and_wait.assert_called_once_with(
-        topic,
-        key=key.encode(),
-        value=value,
-        headers=None
+        topic, key=key.encode(), value=value, headers=None
     )
 
     assert f'Error raised while producing to Topic {topic}' in caplog.text
@@ -83,12 +82,9 @@ async def test_aiter_fail(mocker, caplog):
     """Should fail to consume messages and log an error."""
     caplog.set_level(logging.ERROR)
     mock_consumer = mocker.patch(
-        'slipstream.core.AIOKafkaConsumer',
-        autospec=True
+        'slipstream.core.AIOKafkaConsumer', autospec=True
     ).return_value
-    mock_consumer.__aiter__ = mocker.Mock(
-        side_effect=RuntimeError('')
-    )
+    mock_consumer.__aiter__ = mocker.Mock(side_effect=RuntimeError(''))
 
     topic = 'test'
     t = Topic(topic, {})
@@ -103,17 +99,22 @@ async def test_aiter_fail(mocker, caplog):
 @pytest.mark.asyncio
 async def test_sink_output(mocker):
     """Should return the output of the sink function."""
+
     def src():
         pass
 
     stub = mocker.stub(name='handler')
 
-    def sync_f(x): stub(x)
+    def sync_f(x):
+        stub(x)
+
     await _sink_output(src, sync_f, (1, 2))
     stub.assert_called_once_with((1, 2))
     stub.reset_mock()
 
-    async def async_f(x): stub(x)
+    async def async_f(x):
+        stub(x)
+
     await _sink_output(src, async_f, (1, 2))
     stub.assert_called_once_with((1, 2))
     stub.reset_mock()
@@ -137,11 +138,7 @@ async def test_handle(mocker):
 
     sink = mocker.AsyncMock()
 
-    handle(
-        source,
-        pipe=[pipe],
-        sink=[sink]
-    )(handler)
+    handle(source, pipe=[pipe], sink=[sink])(handler)
 
     c = Conf()
     it_key = str(id(source))

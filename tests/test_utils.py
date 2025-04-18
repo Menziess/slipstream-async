@@ -1,3 +1,5 @@
+"""Utils tests."""
+
 from asyncio import Condition, gather, sleep
 
 import pytest
@@ -15,6 +17,7 @@ from slipstream.utils import (
 
 
 def test_iscoroutinecallable():
+    """Should check whether function is coroutine."""
 
     def _s():
         return True
@@ -33,6 +36,7 @@ def test_iscoroutinecallable():
 
 def test_get_param_names():
     """Should return all parameter names."""
+
     def f(a, b, c=0, *args, d=0, **kwargs):
         pass
 
@@ -47,6 +51,7 @@ def test_get_param_names():
 
 def test_Singleton():
     """Should maintain a single instance of a class."""
+
     class MySingleton(metaclass=Singleton):
         def __update__(self):
             pass

@@ -1,3 +1,5 @@
+"""Checkpointing tests."""
+
 from datetime import datetime, timedelta
 
 import pytest
@@ -9,13 +11,13 @@ from slipstream.core import Signal
 
 @pytest.fixture
 def dependency():
-    """A typical dependency object."""
+    """Dependency instance."""
     return Dependency('emoji', emoji())
 
 
 @pytest.fixture
 def checkpoint(mock_cache):
-    """A typical checkpoint object."""
+    """Checkpoint instance."""
 
     async def dependent():
         yield {'event_timestamp': datetime(2025, 1, 1, 10)}
@@ -41,8 +43,9 @@ def test_dependency_save_and_load(mock_cache, dependency):
     """Should save and load dependency using cache."""
     checkpoint_state = {'offset': 1}
     checkpoint_marker = datetime(2025, 1, 1, 10)
-    dependency.save(mock_cache, '_prefix_',
-                    checkpoint_state, checkpoint_marker)
+    dependency.save(
+        mock_cache, '_prefix_', checkpoint_state, checkpoint_marker
+    )
 
     loaded_dep = Dependency('emoji', iterable_to_async([]))
     loaded_dep.load(mock_cache, '_prefix_')
@@ -111,7 +114,8 @@ async def test_heartbeat_single_dependency(checkpoint):
 async def test_heartbeat_multiple_dependencies_error(checkpoint):
     """Should warn about missing argument."""
     checkpoint.dependencies['extra'] = Dependency(
-        'extra', iterable_to_async([]))
+        'extra', iterable_to_async([])
+    )
     with pytest.raises(ValueError, match='`dependency_name` must be provided'):
         await checkpoint.heartbeat(datetime(2025, 1, 1, 10))
 
@@ -120,7 +124,8 @@ async def test_heartbeat_multiple_dependencies_error(checkpoint):
 async def test_heartbeat_with_dependency_name(checkpoint):
     """Should correctly update dependency data."""
     checkpoint.dependencies['extra'] = Dependency(
-        'extra', iterable_to_async([]))
+        'extra', iterable_to_async([])
+    )
     marker = datetime(2025, 1, 1, 10, 30)
     await checkpoint.heartbeat(marker, 'dependency')
 
@@ -147,13 +152,14 @@ async def test_check_pulse_downtime_detected(checkpoint, mocker):
     mock_iterable = mocker.MagicMock()
     mocker.patch(
         'slipstream.core.Conf.iterables',
-        {str(id(checkpoint.dependent)): mock_iterable}
+        {str(id(checkpoint.dependent)): mock_iterable},
     )
 
     await checkpoint.check_pulse(datetime(2025, 1, 1, 10), offset=0)
 
     downtime = await checkpoint.check_pulse(
-        datetime(2025, 1, 1, 10, 30), offset=1)
+        datetime(2025, 1, 1, 10, 30), offset=1
+    )
 
     # Downtime observed, dependent paused
     assert isinstance(downtime, timedelta)
@@ -167,7 +173,7 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
     mock_iterable = mocker.MagicMock()
     mocker.patch(
         'slipstream.core.Conf.iterables',
-        {str(id(checkpoint.dependent)): mock_iterable}
+        {str(id(checkpoint.dependent)): mock_iterable},
     )
 
     # If no dependency data has ever come in yet, use the first
@@ -217,12 +223,14 @@ async def test_custom_callbacks(is_async, checkpoint, mocker):
     await checkpoint.check_pulse(datetime(2025, 1, 1, 10), state={'offset': 0})
     await checkpoint.check_pulse(datetime(2025, 1, 1, 11), state={'offset': 1})
     downtime_callback.assert_called_once_with(
-        checkpoint, checkpoint['dependency'])
+        checkpoint, checkpoint['dependency']
+    )
 
     # Trigger recovery
     await checkpoint.heartbeat(datetime(2025, 1, 1, 11, 1))
     recovery_callback.assert_called_once_with(
-        checkpoint, checkpoint['dependency'])
+        checkpoint, checkpoint['dependency']
+    )
 
 
 def test_repr(checkpoint):

@@ -1,3 +1,5 @@
+"""Init tests."""
+
 import pytest
 from conftest import iterable_to_async
 
@@ -37,9 +39,7 @@ async def test_stream(mocker):
 @pytest.mark.asyncio
 async def test_kwargable_function():
     """Should try to pass kwargs to user defined handler function."""
-    my_kwargs = {
-        'my_kwarg': 'kwarg value'
-    }
+    my_kwargs = {'my_kwarg': 'kwarg value'}
     is_kwargable = False
     is_unkwargable = False
 

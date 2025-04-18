@@ -1,14 +1,11 @@
 """Slipstream utilities."""
 
 from asyncio import Condition, Queue
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from enum import Enum
 from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
-    AsyncIterable,
-    AsyncIterator,
-    Awaitable,
-    Callable,
     TypeAlias,
 )
 
@@ -32,8 +29,7 @@ class Signal(Enum):
 def iscoroutinecallable(o: Any) -> bool:
     """Check whether function is coroutine."""
     return iscoroutinefunction(o) or (
-        hasattr(o, '__call__')
-        and iscoroutinefunction(o.__call__)
+        hasattr(o, '__call__') and iscoroutinefunction(o.__call__)
     )
 
 
@@ -51,10 +47,7 @@ class Singleton(type):
     def __call__(cls, *args: Any, **kwargs: Any):
         """Apply metaclass singleton action."""
         if cls not in cls._instances:
-            cls._instances[cls] = super(
-                Singleton,
-                cls
-            ).__call__(*args, **kwargs)
+            cls._instances[cls] = super().__call__(*args, **kwargs)
         instance = cls._instances[cls]
         if hasattr(instance, '__update__'):
             instance.__update__(*args, **kwargs)
@@ -79,24 +72,14 @@ class PubSub(metaclass=Singleton):
             if not self._topics[topic]:
                 del self._topics[topic]
 
-    def publish(
-        self,
-        topic: str,
-        *args: Any,
-        **kwargs: Any
-    ) -> None:
+    def publish(self, topic: str, *args: Any, **kwargs: Any) -> None:
         """Publish message to subscribers of topic."""
         if topic not in self._topics:
             return
         for listener in self._topics[topic]:
             listener(*args, **kwargs)
 
-    async def apublish(
-        self,
-        topic: str,
-        *args: Any,
-        **kwargs: Any
-    ) -> None:
+    async def apublish(self, topic: str, *args: Any, **kwargs: Any) -> None:
         """Publish message to subscribers of topic."""
         if topic not in self._topics:
             return

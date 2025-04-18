@@ -2,8 +2,9 @@
 
 import signal
 from asyncio import sleep
+from collections.abc import AsyncIterable, Iterable, Iterator
 from contextlib import contextmanager
-from typing import Any, AsyncIterable, Iterable, Iterator
+from typing import Any
 
 from pytest import fixture
 from testcontainers.kafka import KafkaContainer
@@ -52,6 +53,7 @@ def kafka():
 @fixture
 def timeout():
     """Contextmanager that will stop execution of body."""
+
     @contextmanager
     def set_timeout(seconds: int):
         def raise_timeout(*_):

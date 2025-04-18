@@ -1,5 +1,7 @@
+"""Cache tests."""
+
 from asyncio import gather, sleep
-from typing import AsyncIterable, Callable
+from collections.abc import AsyncIterable, Callable
 
 import pytest
 from rocksdict import DbClosedError, ReadOptions, WriteOptions
@@ -8,12 +10,15 @@ from slipstream.caching import Cache
 
 
 @pytest.mark.serial
-@pytest.mark.parametrize('key,val,updated', [
-    (b'123', 'a', 'b'),
-    ('123', 'b', 'c'),
-    (True, 'c', 'd'),
-    (123, 'd', 'e'),
-])
+@pytest.mark.parametrize(
+    'key,val,updated',
+    [
+        (b'123', 'a', 'b'),
+        ('123', 'b', 'c'),
+        (True, 'c', 'd'),
+        (123, 'd', 'e'),
+    ],
+)
 def test_crud(key, val, updated, cache):
     """Test create/read/update/delete."""
     cache[key] = val
@@ -103,9 +108,7 @@ def test_wrapper_methods(cache):
 
     assert cache.key_may_exist('key') is False
 
-    assert list(cache.columns(from_key='entity')) == [
-        [('a', 1), ('b', 2)]
-    ]
+    assert list(cache.columns(from_key='entity')) == [[('a', 1), ('b', 2)]]
 
     assert list(cache.entities(from_key='entity')) == [
         ('entity', [('a', 1), ('b', 2)])

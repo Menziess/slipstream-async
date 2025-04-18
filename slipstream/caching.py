@@ -2,12 +2,11 @@
 
 import os
 from asyncio import Lock
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import (
     Any,
-    Callable,
-    Type,
     TypeVar,
 )
 
@@ -19,8 +18,9 @@ rocksdict_available = False
 
 try:
     import rocksdict  # noqa: F401  # ruff: noqa # pyright: ignore
+
     rocksdict_available = True
-except ImportError:   # pragma: no cover
+except ImportError:  # pragma: no cover
     pass
 
 __all__ = [
@@ -61,12 +61,12 @@ if rocksdict_available:
     class Cache(ICache):
         """Create a RocksDB database in the specified folder.
 
-        >>> cache = Cache('db/mycache')            # doctest: +SKIP
+        >>> cache = Cache('db/mycache')  # doctest: +SKIP
 
         The cache instance acts as a callable to store data:
 
         >>> cache('key', {'msg': 'Hello World!'})  # doctest: +SKIP
-        >>> cache['key']                           # doctest: +SKIP
+        >>> cache['key']  # doctest: +SKIP
         {'msg': 'Hello World!'}
         """
 
@@ -77,7 +77,7 @@ if rocksdict_available:
             column_families: dict[str, Options] | None = None,
             access_type: AccessType = AccessType.read_write(),
             target_table_size: int = 25 * MB,
-            number_of_locks: int = 16
+            number_of_locks: int = 16,
         ) -> None:
             """Create instance that holds rocksdb reference.
 
@@ -91,10 +91,12 @@ if rocksdict_available:
             self._number_of_locks = number_of_locks
             self._locks = [Lock() for _ in range(self._number_of_locks)]
             options = options or self._default_options(target_table_size)
-            column_families = column_families or {
-                key: options
-                for key in Rdict.list_cf(path, options)
-            } if os.path.exists(path + '/CURRENT') else {}
+            column_families = (
+                column_families
+                or {key: options for key in Rdict.list_cf(path, options)}
+                if os.path.exists(path + '/CURRENT')
+                else {}
+            )
             self.db = Rdict(path, options, column_families, access_type)
 
         @staticmethod
@@ -153,7 +155,7 @@ if rocksdict_available:
         async def transaction(self, key: Key):
             """Lock the db entry while using the context manager.
 
-            >>> async with cache.transaction('fish'):    # doctest: +SKIP
+            >>> async with cache.transaction('fish'):  # doctest: +SKIP
             ...     cache['fish'] = '🐟'
 
             - This works for asynchronous code (not multi-threading/processing)
@@ -170,9 +172,9 @@ if rocksdict_available:
 
         def __exit__(
             self,
-            exc_type: Type[BaseException] | None,
+            exc_type: type[BaseException] | None,
             exc_val: BaseException | None,
-            exc_tb: TracebackType | None
+            exc_tb: TracebackType | None,
         ) -> None:
             """Exit contextmanager."""
             self.close()
@@ -194,10 +196,7 @@ if rocksdict_available:
             return self.db.set_write_options(write_opt)
 
         def put(
-            self,
-            key: Key,
-            value: Any,
-            write_opt: WriteOptions | None = None
+            self, key: Key, value: Any, write_opt: WriteOptions | None = None
         ) -> None:
             """Put item in database using key."""
             return self.db.put(key, value, write_opt)
@@ -206,7 +205,7 @@ if rocksdict_available:
             self,
             key: Key | list[Key],
             default: T = None,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> Any | T:
             """Get item from database by key."""
             return self.db.get(key, default, read_opt)
@@ -216,7 +215,7 @@ if rocksdict_available:
             key: Key,
             names: list[Any],
             values: list[Any],
-            write_opt: WriteOptions | None = None
+            write_opt: WriteOptions | None = None,
         ) -> None:
             """Put wide-column in database using key.
 
@@ -228,7 +227,7 @@ if rocksdict_available:
             self,
             key: Key | list[Key],
             default: Any = None,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> list[tuple[Any, Any]] | None:
             """Get wide-column from database by key.
 
@@ -238,9 +237,7 @@ if rocksdict_available:
             return self.db.get_entity(key, default, read_opt)
 
         def delete(
-            self,
-            key: Key,
-            write_opt: WriteOptions | None = None
+            self, key: Key, write_opt: WriteOptions | None = None
         ) -> None:
             """Delete item from database."""
             return self.db.delete(key, write_opt)
@@ -249,15 +246,12 @@ if rocksdict_available:
             self,
             key: Key,
             fetch: bool = False,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> bool | tuple[bool, Any]:
             """Check if a key exist without performing IO operations."""
             return self.db.key_may_exist(key, fetch, read_opt)
 
-        def iter(
-            self,
-            read_opt: ReadOptions | None = None
-        ) -> RdictIter:
+        def iter(self, read_opt: ReadOptions | None = None) -> RdictIter:
             """Get iterable."""
             return self.db.iter(read_opt)
 
@@ -265,7 +259,7 @@ if rocksdict_available:
             self,
             backwards: bool = False,
             from_key: str | int | float | bytes | bool | None = None,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> RdictItems:
             """Get tuples of key-value pairs."""
             return self.db.items(backwards, from_key, read_opt)
@@ -274,7 +268,7 @@ if rocksdict_available:
             self,
             backwards: bool = False,
             from_key: str | int | float | bytes | bool | None = None,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> RdictKeys:
             """Get keys."""
             return self.db.keys(backwards, from_key, read_opt)
@@ -283,7 +277,7 @@ if rocksdict_available:
             self,
             backwards: bool = False,
             from_key: Key | None = None,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> RdictValues:
             """Get values."""
             return self.db.values(backwards, from_key, read_opt)
@@ -292,7 +286,7 @@ if rocksdict_available:
             self,
             backwards: bool = False,
             from_key: Key | None = None,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> RdictColumns:
             """Get values as widecolumns."""
             return self.db.columns(backwards, from_key, read_opt)
@@ -301,7 +295,7 @@ if rocksdict_available:
             self,
             backwards: bool = False,
             from_key: Key | None = None,
-            read_opt: ReadOptions | None = None
+            read_opt: ReadOptions | None = None,
         ) -> RdictEntities:
             """Get keys and entities."""
             return self.db.entities(backwards, from_key, read_opt)
@@ -309,7 +303,7 @@ if rocksdict_available:
         def ingest_external_file(
             self,
             paths: list[str],
-            opts: IngestExternalFileOptions = IngestExternalFileOptions()
+            opts: IngestExternalFileOptions = IngestExternalFileOptions(),
         ) -> None:
             """Load list of SST files into current column family."""
             return self.db.ingest_external_file(paths, opts)
@@ -327,18 +321,13 @@ if rocksdict_available:
             return self.db.drop_column_family(name)
 
         def create_column_family(
-            self,
-            name: str,
-            options: Options = Options()
+            self, name: str, options: Options = Options()
         ) -> Rdict:
             """Craete column family."""
             return self.db.create_column_family(name, options)
 
         def delete_range(
-            self,
-            begin: Key,
-            end: Key,
-            write_opt: WriteOptions | None = None
+            self, begin: Key, end: Key, write_opt: WriteOptions | None = None
         ) -> None:
             """Delete database items, excluding end."""
             return self.db.delete_range(begin, end, write_opt)
@@ -376,9 +365,7 @@ if rocksdict_available:
             self.db.cancel_all_background(wait)
 
         def list_cf(
-            self,
-            path: str,
-            options: Options = Options()
+            self, path: str, options: Options = Options()
         ) -> list[str]:
             """List column families."""
             return self.db.list_cf(path, options)
@@ -391,7 +378,7 @@ if rocksdict_available:
             self,
             begin: Key | None,
             end: Key | None,
-            compact_opt: CompactOptions = CompactOptions()
+            compact_opt: CompactOptions = CompactOptions(),
         ) -> None:
             """Run manual compaction on range for the current column family."""
             return self.db.compact_range(begin, end, compact_opt)
@@ -403,7 +390,7 @@ if rocksdict_available:
         def write(
             self,
             write_batch: WriteBatch,
-            write_opt: WriteOptions | None = None
+            write_opt: WriteOptions | None = None,
         ) -> None:
             """Write a batch."""
             self.db.write(write_batch, write_opt)

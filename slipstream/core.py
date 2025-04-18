@@ -2,19 +2,20 @@
 
 import logging
 from asyncio import gather, sleep, wait_for
-from collections.abc import AsyncIterable
-from inspect import isasyncgenfunction, signature
-from re import sub
-from typing import (
-    Any,
+from collections.abc import (
     AsyncGenerator,
+    AsyncIterable,
     AsyncIterator,
     Awaitable,
     Callable,
     Generator,
     Iterable,
+)
+from inspect import isasyncgenfunction, signature
+from re import sub
+from typing import (
+    Any,
     Literal,
-    Optional,
     cast,
 )
 
@@ -33,6 +34,7 @@ aiokafka_available = False
 
 try:
     import aiokafka  # noqa: F401  # ruff: noqa # pyright: ignore
+
     aiokafka_available = True
 except ImportError:  # pragma: no cover
     pass
@@ -82,8 +84,7 @@ class PausableStream:
         if self._iterator is None:
             if hasattr(self._iterable, 'asend'):
                 self._iterator = cast(
-                    AsyncGenerator[Any, Signal | Any],
-                    self._iterable
+                    AsyncGenerator[Any, Signal | Any], self._iterable
                 )
             else:
                 self._iterator = aiter(self._iterable)
@@ -103,7 +104,6 @@ class PausableStream:
                 # When the stream is paused and the generator handles
                 # the signal, it should yield SENTINEL
                 if msg is not Signal.SENTINEL:
-
                     # Otherwise we assume that the generator does not
                     # handle the pause, so we pause here
                     while self.signal is Signal.PAUSE:
@@ -149,19 +149,12 @@ class Conf(metaclass=Singleton):
     pipes: dict[AsyncCallable, tuple[str, tuple[AsyncCallable, ...]]] = {}
     exit_hooks: set[AsyncCallable] = set()
 
-    def register_iterable(
-        self,
-        key: str,
-        it: AsyncIterable[Any]
-    ):
+    def register_iterable(self, key: str, it: AsyncIterable[Any]):
         """Add iterable to global Conf."""
         self.iterables[key] = PausableStream(it)
 
     def register_handler(
-        self,
-        key: str,
-        handler: AsyncCallable,
-        *pipe: AsyncCallable
+        self, key: str, handler: AsyncCallable, *pipe: AsyncCallable
     ):
         """Add handler to global Conf."""
         if pipe:
@@ -169,20 +162,19 @@ class Conf(metaclass=Singleton):
         else:
             self.pubsub.subscribe(key, handler)
 
-    def register_exit_hook(
-        self,
-        exit_hook: AsyncCallable
-    ):
+    def register_exit_hook(self, exit_hook: AsyncCallable):
         """Add exit hook that's called on shutdown."""
         self.exit_hooks.add(exit_hook)
 
     async def start(self, **kwargs: Any):
         """Start processing registered iterables."""
         try:
-            await gather(*[
-                self._distribute_messages(key, pausable_stream, kwargs)
-                for key, pausable_stream in self.iterables.items()
-            ])
+            await gather(
+                *[
+                    self._distribute_messages(key, pausable_stream, kwargs)
+                    for key, pausable_stream in self.iterables.items()
+                ]
+            )
         except KeyboardInterrupt:
             pass
         except Exception as e:
@@ -200,35 +192,30 @@ class Conf(metaclass=Singleton):
             await hook()
 
     async def _distribute_messages(
-        self,
-        key: str,
-        pausable_stream: PausableStream,
-        kwargs: Any
+        self, key: str, pausable_stream: PausableStream, kwargs: Any
     ):
         """Publish messages from stream."""
+
         async def _distribute(stream, kwargs):
             async for msg in stream:
                 await self.pubsub.apublish(key, msg, **kwargs)
 
         if piped_handlers := [
-            (handler, v[1])
-            for handler, v in self.pipes.items()
-            if v[0] == key
+            (handler, v[1]) for handler, v in self.pipes.items() if v[0] == key
         ]:
             s = AsyncSynchronizedGenerator(pausable_stream)
-            await gather(_distribute(s, kwargs), *[
-                self._pipe(s.copy(), handler, *funcs, **kwargs)
-                for handler, funcs in piped_handlers
-            ])
+            await gather(
+                _distribute(s, kwargs),
+                *[
+                    self._pipe(s.copy(), handler, *funcs, **kwargs)
+                    for handler, funcs in piped_handlers
+                ],
+            )
         else:
             await _distribute(pausable_stream, kwargs)
 
     async def _pipe(
-        self,
-        stream: AsyncIterable,
-        handler: AsyncCallable,
-        *funcs,
-        **kwargs
+        self, stream: AsyncIterable, handler: AsyncCallable, *funcs, **kwargs
     ):
         """Push stream through pipe before feeding it to the handler."""
         for func in funcs:
@@ -266,15 +253,18 @@ if aiokafka_available:
     class Topic:
         """Act as a consumer and producer.
 
-        >>> topic = Topic('emoji', {
-        ...     'bootstrap_servers': 'localhost:29091',
-        ...     'auto_offset_reset': 'earliest',
-        ...     'group_id': 'demo',
-        ... })
+        >>> topic = Topic(
+        ...     'emoji',
+        ...     {
+        ...         'bootstrap_servers': 'localhost:29091',
+        ...         'auto_offset_reset': 'earliest',
+        ...         'group_id': 'demo',
+        ...     },
+        ... )
 
         Loop over topic (iterable) to consume from it:
 
-        >>> async for msg in topic:               # doctest: +SKIP
+        >>> async for msg in topic:  # doctest: +SKIP
         ...     print(msg.value)
 
         Call topic (callable) with data to produce to it:
@@ -286,8 +276,8 @@ if aiokafka_available:
             self,
             name: str,
             conf: dict[str, Any] = {},
-            offset: Optional[int | dict[int, int]] = None,
-            codec: Optional[ICodec] = None,
+            offset: int | dict[int, int] | None = None,
+            codec: ICodec | None = None,
             dry: bool = False,
         ):
             """Create topic instance to produce and consume messages."""
@@ -299,46 +289,47 @@ if aiokafka_available:
             self.codec = codec
             self.dry = dry
 
-            self.consumer: Optional[AIOKafkaConsumer] = None
-            self.producer: Optional[AIOKafkaProducer] = None
-            self._generator: Optional[
+            self.consumer: AIOKafkaConsumer | None = None
+            self.producer: AIOKafkaProducer | None = None
+            self._generator: (
                 AsyncGenerator[
                     Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
-                    bool | None
+                    bool | None,
                 ]
-            ] = None
+                | None
+            ) = None
 
-            if diff := set(self.conf).difference({
-                *get_param_names(AIOKafkaConsumer),
-                *get_param_names(AIOKafkaProducer),
-                *get_param_names(AIOKafkaClient),
-            }):
+            if diff := set(self.conf).difference(
+                {
+                    *get_param_names(AIOKafkaConsumer),
+                    *get_param_names(AIOKafkaProducer),
+                    *get_param_names(AIOKafkaClient),
+                }
+            ):
                 _logger.warning(
                     f'Unexpected Topic {self.name} '
                     f'conf entries: {",".join(diff)}'
                 )
 
-            if (
-                self.conf.get('security_protocol') in ('SSL', 'SASL_SSL')
-                and not self.conf.get('ssl_context')
-            ):
+            if self.conf.get('security_protocol') in (
+                'SSL',
+                'SASL_SSL',
+            ) and not self.conf.get('ssl_context'):
                 self.conf['ssl_context'] = create_ssl_context()
 
         @property
         async def admin(self) -> AIOKafkaClient:
             """Get started instance of Kafka admin client."""
             params = get_param_names(AIOKafkaClient)
-            return AIOKafkaClient(**{
-                k: v
-                for k, v in self.conf.items()
-                if k in params
-            })
+            return AIOKafkaClient(
+                **{k: v for k, v in self.conf.items() if k in params}
+            )
 
         async def seek(
             self,
             offset: int | dict[int, int],
-            consumer: Optional[AIOKafkaConsumer] = None,
-            timeout: float = 30.0
+            consumer: AIOKafkaConsumer | None = None,
+            timeout: float = 30.0,
         ):
             """Seek to offset."""
             c = consumer or self.consumer
@@ -370,13 +361,13 @@ if aiokafka_available:
                 )
 
             # The desired offset per partition
-            offsets = {
-                TopicPartition(self.name, p): offset
-                for p in partitions
-            } if isinstance(offset, int) else {
-                TopicPartition(self.name, p): o
-                for p, o in offset.items()
-            }
+            offsets = (
+                {TopicPartition(self.name, p): offset for p in partitions}
+                if isinstance(offset, int)
+                else {
+                    TopicPartition(self.name, p): o for p, o in offset.items()
+                }
+            )
 
             # Perform seek
             if offset == READ_FROM_START:
@@ -392,11 +383,10 @@ if aiokafka_available:
             params = get_param_names(AIOKafkaConsumer)
             if self.codec:
                 self.conf['value_deserializer'] = self.codec.decode
-            consumer = AIOKafkaConsumer(self.name, **{
-                k: v
-                for k, v in self.conf.items()
-                if k in params
-            })
+            consumer = AIOKafkaConsumer(
+                self.name,
+                **{k: v for k, v in self.conf.items() if k in params},
+            )
             await consumer.start()
             if self.starting_offset:
                 try:
@@ -411,11 +401,9 @@ if aiokafka_available:
             params = get_param_names(AIOKafkaProducer)
             if self.codec:
                 self.conf['value_serializer'] = self.codec.encode
-            producer = AIOKafkaProducer(**{
-                k: v
-                for k, v in self.conf.items()
-                if k in params
-            })
+            producer = AIOKafkaProducer(
+                **{k: v for k, v in self.conf.items() if k in params}
+            )
             await producer.start()
             return producer
 
@@ -423,22 +411,21 @@ if aiokafka_available:
             self,
             key: Any,
             value: Any,
-            headers: Optional[dict[str, str]] = None,
-            **kwargs: Any
+            headers: dict[str, str] | None = None,
+            **kwargs: Any,
         ) -> None:
             """Produce message to topic."""
-            if isinstance(key, str) and not self.conf.get(
-                'key_serializer'
-            ):
+            if isinstance(key, str) and not self.conf.get('key_serializer'):
                 key = key.encode()
             if isinstance(value, str) and not self.conf.get(
                 'value_serializer'
             ):
                 value = value.encode()
-            headers_list = [
-                (k, v.encode())
-                for k, v in headers.items()
-            ] if headers else None
+            headers_list = (
+                [(k, v.encode()) for k, v in headers.items()]
+                if headers
+                else None
+            )
             if self.dry:
                 _logger.warning(
                     f'Skipped sending message to {self.name} [dry=True]'
@@ -452,7 +439,7 @@ if aiokafka_available:
                     key=key,
                     value=value,
                     headers=headers_list,
-                    **kwargs
+                    **kwargs,
                 )
             except Exception as e:
                 _logger.error(
@@ -461,9 +448,10 @@ if aiokafka_available:
                 )
                 raise
 
-        async def init_generator(self) -> AsyncGenerator[
-            Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
-            bool | None
+        async def init_generator(
+            self,
+        ) -> AsyncGenerator[
+            Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any], bool | None
         ]:
             """Iterate over messages from topic."""
             if not self.consumer:
@@ -474,14 +462,12 @@ if aiokafka_available:
                 try:
                     msg: ConsumerRecord[Any, Any]
                     async for msg in consumer:
-                        if (
-                            isinstance(msg.key, bytes)
-                            and not self.conf.get('key_deserializer')
+                        if isinstance(msg.key, bytes) and not self.conf.get(
+                            'key_deserializer'
                         ):
                             msg.key = msg.key.decode()
-                        if (
-                            isinstance(msg.value, bytes)
-                            and not self.conf.get('value_deserializer')
+                        if isinstance(msg.value, bytes) and not self.conf.get(
+                            'value_deserializer'
                         ):
                             msg.value = msg.value.decode()
 
@@ -533,7 +519,7 @@ if aiokafka_available:
                 raise RuntimeError('Topic generator was unset.')
             generator = cast(
                 AsyncGenerator[ConsumerRecord[Any, Any], Signal | None],
-                self._generator
+                self._generator,
             )
             return await generator.asend(value)
 
@@ -567,15 +553,14 @@ if aiokafka_available:
 
 
 async def _sink_output(
-    f: Callable[..., Any],
-    s: AsyncCallable,
-    output: Any
+    f: Callable[..., Any], s: AsyncCallable, output: Any
 ) -> None:
     is_coroutine = iscoroutinecallable(s)
     known_sinks = (Topic, ICache) if aiokafka_available else (ICache,)
     if isinstance(s, known_sinks) and not isinstance(output, tuple):
         raise ValueError(
-            f'Sink expects: (key, val) in {f.__name__}, got :{output}.')
+            f'Sink expects: (key, val) in {f.__name__}, got :{output}.'
+        )
     elif isinstance(s, known_sinks):
         await s(*output)
     else:
@@ -588,15 +573,15 @@ async def _sink_output(
 def handle(
     *iterable: AsyncIterable[Any],
     pipe: Iterable[AsyncCallable] = [],
-    sink: Iterable[Callable | AsyncCallable] = []
+    sink: Iterable[Callable | AsyncCallable] = [],
 ):
     """Bind sources and sinks to the handler function.
 
     Ex:
-        >>> topic = Topic('demo')                 # doctest: +SKIP
-        >>> cache = Cache('state/demo')           # doctest: +SKIP
+        >>> topic = Topic('demo')  # doctest: +SKIP
+        >>> cache = Cache('state/demo')  # doctest: +SKIP
 
-        >>> @handle(topic, sink=[print, cache])   # doctest: +SKIP
+        >>> @handle(topic, sink=[print, cache])  # doctest: +SKIP
         ... def handler(msg, **kwargs):
         ...     return msg.key, msg.value
     """
@@ -655,6 +640,6 @@ def stream(**kwargs: Any):
         >>> kwargs = {
         ...     'env': 'DEV',
         ... }
-        >>> run(stream(**kwargs))                 # doctest: +SKIP
+        >>> run(stream(**kwargs))  # doctest: +SKIP
     """
     return Conf().start(**kwargs)

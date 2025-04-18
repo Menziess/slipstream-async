@@ -16,16 +16,19 @@ from slipstream.core import Signal
 @pytest.mark.asyncio
 async def test_produce_consume(kafka):
     """Should be able to exchange messages with kafka."""
-    t = Topic('test_produce_consume', {
-        'bootstrap_servers': kafka,
-        'auto_offset_reset': 'earliest',
-        'group_instance_id': 'test_produce_consume',
-        'group_id': 'test_produce_consume',
-    })
+    t = Topic(
+        'test_produce_consume',
+        {
+            'bootstrap_servers': kafka,
+            'auto_offset_reset': 'earliest',
+            'group_instance_id': 'test_produce_consume',
+            'group_id': 'test_produce_consume',
+        },
+    )
 
-    await t('a'.encode(), 'a'.encode())
-    await t('b'.encode(), 'b'.encode())
-    await t('c'.encode(), 'c'.encode())
+    await t(b'a', b'a')
+    await t(b'b', b'b')
+    await t(b'c', b'c')
 
     msg = await next(t)
     assert msg.value == 'a'
@@ -42,27 +45,38 @@ async def test_produce_consume(kafka):
 @pytest.mark.asyncio
 async def test_checkpoint_reprocessing(kafka, timeout):
     """Should be able to reprocess erroneous data."""
-    t = Topic('test_checkpoint_reprocessing', {
-        'bootstrap_servers': kafka,
-        'auto_offset_reset': 'earliest',
-        'group_instance_id': 'test_checkpoint_reprocessing',
-        'group_id': 'test_checkpoint_reprocessing',
-    }, codec=JsonCodec())
+    t = Topic(
+        'test_checkpoint_reprocessing',
+        {
+            'bootstrap_servers': kafka,
+            'auto_offset_reset': 'earliest',
+            'group_instance_id': 'test_checkpoint_reprocessing',
+            'group_id': 'test_checkpoint_reprocessing',
+        },
+        codec=JsonCodec(),
+    )
     Conf().register_iterable(str(id(t)), t)
     pausable_stream = Conf().iterables[str(id(t))]
 
-    weather_messages = iter([
-        {'timestamp': dt(2023, 1, 1, 10), 'value': '🌞'},
-        {'timestamp': dt(2023, 1, 1, 11), 'value': '⛅'},
-        {'timestamp': dt(2023, 1, 1, 12), 'value': '🌦️'},
-        {'timestamp': dt(2023, 1, 1, 13), 'value': '🌧'},
-    ])
-    activity_messages = iter([
-        {'timestamp': dt(2023, 1, 1, 10, 30), 'value': 'swimming'},  # 🌞
-        {'timestamp': dt(2023, 1, 1, 11, 30), 'value': 'walking home'},  # ⛅
-        {'timestamp': dt(2023, 1, 1, 12, 30), 'value': 'shopping'},  # 🌦️
-        {'timestamp': dt(2023, 1, 1, 13, 10), 'value': 'lunch'},  # 🌧
-    ])
+    weather_messages = iter(
+        [
+            {'timestamp': dt(2023, 1, 1, 10), 'value': '🌞'},
+            {'timestamp': dt(2023, 1, 1, 11), 'value': '⛅'},
+            {'timestamp': dt(2023, 1, 1, 12), 'value': '🌦️'},
+            {'timestamp': dt(2023, 1, 1, 13), 'value': '🌧'},
+        ]
+    )
+    activity_messages = iter(
+        [
+            {'timestamp': dt(2023, 1, 1, 10, 30), 'value': 'swimming'},  # 🌞
+            {
+                'timestamp': dt(2023, 1, 1, 11, 30),
+                'value': 'walking home',
+            },  # ⛅
+            {'timestamp': dt(2023, 1, 1, 12, 30), 'value': 'shopping'},  # 🌦️
+            {'timestamp': dt(2023, 1, 1, 13, 10), 'value': 'lunch'},  # 🌧
+        ]
+    )
 
     async def next_weather():
         weather = next(weather_messages)
@@ -76,20 +90,27 @@ async def test_checkpoint_reprocessing(kafka, timeout):
         ts = dt.strptime(activity['timestamp'], '%Y-%m-%d %H:%M:%S')
         return (
             await c.check_pulse(ts, **{str(msg.partition): msg.offset}),
-            activity['value']
+            activity['value'],
         )
 
     async def recovery_callback(c: Checkpoint, d: Dependency) -> None:
         offset = cast(dict[str, int], d.checkpoint_state)
         await t.seek({int(p): o for p, o in offset.items()})
 
-    c = Checkpoint('c', t, [
-        Dependency('d', iterable_to_async(weather_messages),
-                   downtime_threshold=timedelta(hours=1))
-    ], recovery_callback=recovery_callback)
+    c = Checkpoint(
+        'c',
+        t,
+        [
+            Dependency(
+                'd',
+                iterable_to_async(weather_messages),
+                downtime_threshold=timedelta(hours=1),
+            )
+        ],
+        recovery_callback=recovery_callback,
+    )
 
     with timeout(seconds=5):
-
         # Send all activities to Kafka
         for activity in activity_messages:
             await t(None, activity)
