@@ -33,7 +33,7 @@ from slipstream.utils import (
 aiokafka_available = False
 
 try:
-    import aiokafka  # noqa: F401  # ruff: noqa # pyright: ignore
+    import aiokafka  # noqa: F401
 
     aiokafka_available = True
 except ImportError:  # pragma: no cover

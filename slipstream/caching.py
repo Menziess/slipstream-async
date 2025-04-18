@@ -17,7 +17,7 @@ from slipstream.interfaces import ICache, Key
 rocksdict_available = False
 
 try:
-    import rocksdict  # noqa: F401  # ruff: noqa # pyright: ignore
+    import rocksdict  # noqa: F401
 
     rocksdict_available = True
 except ImportError:  # pragma: no cover
