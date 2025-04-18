@@ -1,7 +1,8 @@
 """Slipstream interfaces."""
 
 from abc import ABCMeta, abstractmethod
-from typing import Any, AsyncIterator, TypeAlias
+from collections.abc import AsyncIterator
+from typing import Any, TypeAlias
 
 from slipstream.utils import PubSub
 
@@ -41,12 +42,16 @@ class ICache(metaclass=CacheMeta):
     >>> class MyCache(ICache):
     ...     def __init__(self):
     ...         self.db = {}
+    ...
     ...     def __contains__(self, key: Key) -> bool:
     ...         return key in self.db
+    ...
     ...     def __delitem__(self, key: Key) -> None:
     ...         del self.db[key]
+    ...
     ...     def __getitem__(self, key: Key | list[Key]) -> Any:
     ...         return self.db.get(key, None)
+    ...
     ...     def __setitem__(self, key: Key, val: Any) -> None:
     ...         self.db[key] = val
 
@@ -87,13 +92,14 @@ class ICache(metaclass=CacheMeta):
     async def __call__(self, key: Key, val: Any) -> None:
         """Set item in db while also publishing to pubsub."""
         self.__setitem__(key, val)
-        await self._pubsub.apublish(               # type: ignore[attr-defined]
-            self._iterable_key, (key, val)         # type: ignore[attr-defined]
+        await self._pubsub.apublish(  # type: ignore[attr-defined]
+            self._iterable_key,  # type: ignore[attr-defined]
+            (key, val),
         )
 
     async def __aiter__(self) -> AsyncIterator[Any]:
         """Consume published updates to cache."""
         async for msg in self._pubsub.iter_topic(  # type: ignore[attr-defined]
-            self._iterable_key                     # type: ignore[attr-defined]
+            self._iterable_key  # type: ignore[attr-defined]
         ):
             yield msg

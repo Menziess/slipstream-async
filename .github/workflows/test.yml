@@ -49,10 +49,10 @@ jobs:
 
       - name: Run linting
         run: |
-          bandit -c pyproject.toml -r slipstream tests
-          pydocstyle slipstream tests
           pyright slipstream tests
-          flake8 slipstream tests
+          ruff check
+          ruff format --check
+          bandit -c pyproject.toml -r slipstream tests
 
       - name: Run tests
         run: |

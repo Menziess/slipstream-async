@@ -1,3 +1,5 @@
+"""Codecs tests."""
+
 from slipstream.codecs import JsonCodec
 
 
