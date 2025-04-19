@@ -44,7 +44,7 @@ async def test_kwargable_function():
     is_unkwargable = False
 
     @handle(iterable_to_async(range(1)))
-    def kwargable(msg, **kwargs):
+    def kwargable(_, **kwargs):
         nonlocal is_kwargable
         is_kwargable = kwargs == my_kwargs
 

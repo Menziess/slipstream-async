@@ -77,13 +77,63 @@ line-length = 79
 target-version = 'py310'
 
 [tool.ruff.lint]
-extend-select = [
-  'E',
-  'W',
-  'Q',
-  'D',
-  'UP',
-  'D401',
+ignore = [
+  'ANN401',  # allow Any type
+]
+select = [
+  'E',       # pycodestyle
+  'F',       # pyflakes
+  'W',       # pycodestyle
+  'C90',     # mccabe
+  'I',       # isort
+  'D',       # pydocstyle
+  'D401',    # pydocstyle
+  'UP',      # pyupgrade
+  'N',       # pep8-naming
+  'ANN',     # flake8-annotations
+  'ASYNC',   # flake8-async
+  'S',       # flake8-bandit
+  'BLE',     # flake8-blind-except
+  'B',       # flake8-bugbear
+  'A',       # flake8-builtins
+  'COM',     # flake8-commas
+  'CPY',     # copyright-related rules
+  'C4',      # flake8-comprehensions
+  'DTZ',     # flake8-datetimez
+  'T10',     # flake8-debugger
+  'EM',      # flake8-errmsg
+  'ISC',     # flake8-implicit-str-concat
+  'ICN',     # flake8-import-conventions
+  'PIE',     # flake8-pie
+  'T20',     # flake8-print
+  'PT',      # flake8-pytest-style
+  'Q',       # flake8-quotes
+  'RSE',     # flake8-raise
+  'RET',     # flake8-return
+  'SLF',     # flake8-self
+  'SLOT',    # flake8-slots
+  'SIM',     # flake8-simplify
+  'TID',     # flake8-tidy-imports
+  'TCH',     # flake8-type-checking
+  'INT',     # flake8-type-checking
+  'ARG',     # flake8-unused-arguments
+  'PTH',     # flake8-use-pathlib
+  'FIX',     # flake8-fixme
+  'PGH',     # pygrep-hooks
+  'TRY',     # tryceratops
+  'FLY',     # flynt
+  'PERF',    # Perflint
+  'FURB',    # refurb
+  'RUF',     # Ruff-specific rules
+]
+
+[tool.ruff.lint.per-file-ignores]
+'tests/*.py' = [
+  'PLR2004', # magic value comparison
+  'S101',    # use of assert detected
+  'TCH002',  # third party import (for pytest)
+  'ANN',     # missing type annotation
+  'SLF',     # private member access
 ]
 
 [tool.ruff.format]
@@ -96,9 +146,6 @@ convention = 'google'
 [tool.ruff.lint.flake8-quotes]
 inline-quotes = 'single'
 docstring-quotes = 'double'
-
-[tool.mypy]
-ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = '--doctest-modules --cov=slipstream --cov-report=term-missing'

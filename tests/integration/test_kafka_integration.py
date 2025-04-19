@@ -1,7 +1,7 @@
 """Test integration with kafka."""
 
 from datetime import datetime as dt
-from datetime import timedelta
+from datetime import timedelta, timezone
 from typing import cast
 
 import pytest
@@ -11,6 +11,8 @@ from slipstream import Conf, Topic
 from slipstream.checkpointing import Checkpoint, Dependency
 from slipstream.codecs import JsonCodec
 from slipstream.core import Signal
+
+UTC = timezone.utc
 
 
 @pytest.mark.asyncio
@@ -60,22 +62,31 @@ async def test_checkpoint_reprocessing(kafka, timeout):
 
     weather_messages = iter(
         [
-            {'timestamp': dt(2023, 1, 1, 10), 'value': '🌞'},
-            {'timestamp': dt(2023, 1, 1, 11), 'value': '⛅'},
-            {'timestamp': dt(2023, 1, 1, 12), 'value': '🌦️'},
-            {'timestamp': dt(2023, 1, 1, 13), 'value': '🌧'},
-        ]
+            {'timestamp': dt(2023, 1, 1, 10, tzinfo=UTC), 'value': '🌞'},
+            {'timestamp': dt(2023, 1, 1, 11, tzinfo=UTC), 'value': '⛅'},
+            {'timestamp': dt(2023, 1, 1, 12, tzinfo=UTC), 'value': '🌦️'},
+            {'timestamp': dt(2023, 1, 1, 13, tzinfo=UTC), 'value': '🌧'},
+        ],
     )
     activity_messages = iter(
         [
-            {'timestamp': dt(2023, 1, 1, 10, 30), 'value': 'swimming'},  # 🌞
             {
-                'timestamp': dt(2023, 1, 1, 11, 30),
+                'timestamp': dt(2023, 1, 1, 10, 30, tzinfo=UTC),
+                'value': 'swimming',
+            },  # 🌞
+            {
+                'timestamp': dt(2023, 1, 1, 11, 30, tzinfo=UTC),
                 'value': 'walking home',
             },  # ⛅
-            {'timestamp': dt(2023, 1, 1, 12, 30), 'value': 'shopping'},  # 🌦️
-            {'timestamp': dt(2023, 1, 1, 13, 10), 'value': 'lunch'},  # 🌧
-        ]
+            {
+                'timestamp': dt(2023, 1, 1, 12, 30, tzinfo=UTC),
+                'value': 'shopping',
+            },  # 🌦️
+            {
+                'timestamp': dt(2023, 1, 1, 13, 10, tzinfo=UTC),
+                'value': 'lunch',
+            },  # 🌧
+        ],
     )
 
     async def next_weather():
@@ -86,15 +97,19 @@ async def test_checkpoint_reprocessing(kafka, timeout):
     async def next_activity():
         msg = await next(t)
         if not (activity := msg.value):
-            raise RuntimeError('Missing message value.')
-        ts = dt.strptime(activity['timestamp'], '%Y-%m-%d %H:%M:%S')
+            err_msg = 'Missing message value.'
+            raise RuntimeError(err_msg)
+        ts = dt.strptime(
+            activity['timestamp'],
+            '%Y-%m-%d %H:%M:%S%z',
+        ).astimezone(UTC)
         return (
             await c.check_pulse(ts, **{str(msg.partition): msg.offset}),
             activity['value'],
         )
 
-    async def recovery_callback(c: Checkpoint, d: Dependency) -> None:
-        offset = cast(dict[str, int], d.checkpoint_state)
+    async def recovery_callback(_: Checkpoint, d: Dependency) -> None:
+        offset = cast('dict[str, int]', d.checkpoint_state)
         await t.seek({int(p): o for p, o in offset.items()})
 
     c = Checkpoint(
@@ -105,7 +120,7 @@ async def test_checkpoint_reprocessing(kafka, timeout):
                 'd',
                 iterable_to_async(weather_messages),
                 downtime_threshold=timedelta(hours=1),
-            )
+            ),
         ],
         recovery_callback=recovery_callback,
     )

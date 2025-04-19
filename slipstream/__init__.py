@@ -13,9 +13,9 @@ if aiokafka_available:
 
 __all__ = [
     'VERSION',
+    'Cache',
     'Conf',
     'Topic',
-    'Cache',
     'handle',
     'stream',
 ]

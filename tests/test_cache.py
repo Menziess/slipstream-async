@@ -11,7 +11,7 @@ from slipstream.caching import Cache
 
 @pytest.mark.serial
 @pytest.mark.parametrize(
-    'key,val,updated',
+    ('key', 'val', 'updated'),
     [
         (b'123', 'a', 'b'),
         ('123', 'b', 'c'),
@@ -111,5 +111,5 @@ def test_wrapper_methods(cache):
     assert list(cache.columns(from_key='entity')) == [[('a', 1), ('b', 2)]]
 
     assert list(cache.entities(from_key='entity')) == [
-        ('entity', [('a', 1), ('b', 2)])
+        ('entity', [('a', 1), ('b', 2)]),
     ]

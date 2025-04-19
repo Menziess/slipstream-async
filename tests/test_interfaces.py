@@ -8,7 +8,7 @@ import pytest
 from slipstream.interfaces import ICache, ICodec, Key
 
 
-def test_ICodec():
+def test_icodec():
     """Should be usable as interface."""
 
     class Codec(ICodec):
@@ -25,7 +25,7 @@ def test_ICodec():
 
 
 @pytest.mark.asyncio
-async def test_ICache():
+async def test_icache():
     """Should be usable as interface."""
 
     class Cache(ICache):

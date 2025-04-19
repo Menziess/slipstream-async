@@ -5,17 +5,18 @@ from collections.abc import AsyncIterable, Callable
 
 import pytest
 from conftest import emoji
+from pytest_mock import MockerFixture
 
 from slipstream import Conf
 from slipstream.core import Topic, _sink_output, handle, stream
 
 
 @pytest.mark.asyncio
-async def test_Conf(mocker):
+async def test_conf(mocker: MockerFixture) -> None:
     """Should distribute messages in parallel."""
     Conf().iterables = {}
     c = Conf({'group.id': 'test'})
-    assert c.group_id == 'test'  # type: ignore
+    assert c.group_id == 'test'  # type: ignore[attr-defined]
     assert c.iterables == {}
 
     # Register iterable
@@ -42,47 +43,52 @@ async def test_Conf(mocker):
     ]
 
 
-def test_get_iterable():
+def test_get_iterable() -> None:
     """Should return an interable."""
     t = Topic('test', {'group.id': 'test'})
     assert isinstance(aiter(t), AsyncIterable)
 
 
-def test_get_callable():
+def test_get_callable() -> None:
     """Should return a callable."""
     t = Topic('test', {})
     assert isinstance(t, Callable)
 
 
 @pytest.mark.asyncio
-async def test_call_fail(mocker, caplog):
+async def test_call_fail(mocker: MockerFixture, caplog) -> None:
     """Should fail to produce message and log an error."""
     mock_producer = mocker.patch(
-        'slipstream.core.AIOKafkaProducer', autospec=True
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
     ).return_value
     mock_producer.send_and_wait = mocker.AsyncMock(
-        side_effect=RuntimeError('')
+        side_effect=RuntimeError('Something went wrong'),
     )
 
     topic, key, value = 'test', '', {}
     t = Topic(topic, {})
 
-    with pytest.raises(RuntimeError, match=''):
+    with pytest.raises(RuntimeError, match='Something went wrong'):
         await t(key, value)
 
     mock_producer.send_and_wait.assert_called_once_with(
-        topic, key=key.encode(), value=value, headers=None
+        topic,
+        key=key.encode(),
+        value=value,
+        headers=None,
     )
 
-    assert f'Error raised while producing to Topic {topic}' in caplog.text
+    assert f'Error while producing to Topic {topic}' in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_aiter_fail(mocker, caplog):
+async def test_aiter_fail(mocker, caplog) -> None:
     """Should fail to consume messages and log an error."""
     caplog.set_level(logging.ERROR)
     mock_consumer = mocker.patch(
-        'slipstream.core.AIOKafkaConsumer', autospec=True
+        'slipstream.core.AIOKafkaConsumer',
+        autospec=True,
     ).return_value
     mock_consumer.__aiter__ = mocker.Mock(side_effect=RuntimeError(''))
 
@@ -90,14 +96,13 @@ async def test_aiter_fail(mocker, caplog):
     t = Topic(topic, {})
 
     with pytest.raises(RuntimeError, match=''):
-        async for _ in t:
-            break
+        await next(t)
 
-    assert f'Error raised while consuming from Topic {topic}' in caplog.text
+    assert f'Error while consuming from Topic {topic}' in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_sink_output(mocker):
+async def test_sink_output(mocker: MockerFixture) -> None:
     """Should return the output of the sink function."""
 
     def src():
@@ -121,7 +126,7 @@ async def test_sink_output(mocker):
 
 
 @pytest.mark.asyncio
-async def test_handle(mocker):
+async def test_handle(mocker: MockerFixture) -> None:
     """Should decorate handler and register iterables, handlers, pipes."""
 
     async def number():
@@ -142,8 +147,9 @@ async def test_handle(mocker):
 
     c = Conf()
     it_key = str(id(source))
-    assert c.iterables[it_key]._iterable == source
-    assert list(c.pipes.items())[0][1] == (it_key, (pipe,))
+    assert c.iterables[it_key].iterable == source
+    pipes = list(c.pipes.items())
+    assert pipes[0][1] == (it_key, (pipe,))
 
     await stream()
 

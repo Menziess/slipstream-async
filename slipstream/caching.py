@@ -2,8 +2,9 @@
 
 import os
 from asyncio import Lock
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import TracebackType
 from typing import (
     Any,
@@ -75,7 +76,7 @@ if rocksdict_available:
             path: str,
             options: Options | None = None,
             column_families: dict[str, Options] | None = None,
-            access_type: AccessType = AccessType.read_write(),
+            access_type: AccessType | None = None,
             target_table_size: int = 25 * MB,
             number_of_locks: int = 16,
         ) -> None:
@@ -91,20 +92,21 @@ if rocksdict_available:
             self._number_of_locks = number_of_locks
             self._locks = [Lock() for _ in range(self._number_of_locks)]
             options = options or self._default_options(target_table_size)
+            access_type = access_type or AccessType.read_write()
             column_families = (
                 column_families
-                or {key: options for key in Rdict.list_cf(path, options)}
-                if os.path.exists(path + '/CURRENT')
+                or dict.fromkeys(Rdict.list_cf(path, options), options)
+                if Path(path + '/CURRENT').exists()
                 else {}
             )
             self.db = Rdict(path, options, column_families, access_type)
 
         @staticmethod
-        def _default_options(target_table_size: int):
+        def _default_options(target_table_size: int) -> Options:
             options = Options()
             compaction_options = FifoCompactOptions()
             compaction_options.max_table_files_size = target_table_size
-            options.create_if_missing(True)
+            options.create_if_missing(create_if_missing=True)
             options.set_max_background_jobs(os.cpu_count() or 2)
             options.increase_parallelism(os.cpu_count() or 2)
             options.set_log_file_time_to_roll(30 * MINUTES)
@@ -126,7 +128,7 @@ if rocksdict_available:
             return options
 
         @asynccontextmanager
-        async def _get_lock(self, key: Key):
+        async def _get_lock(self, key: Key) -> AsyncGenerator[Lock, None]:
             """Get lock from a pool of locks based on key."""
             index = hash(key) % self._number_of_locks
             async with (lock := self._locks[index]):
@@ -152,7 +154,7 @@ if rocksdict_available:
             self.db[key] = val
 
         @asynccontextmanager
-        async def transaction(self, key: Key):
+        async def transaction(self, key: Key) -> AsyncGenerator['Cache', None]:
             """Lock the db entry while using the context manager.
 
             >>> async with cache.transaction('fish'):  # doctest: +SKIP
@@ -196,7 +198,10 @@ if rocksdict_available:
             return self.db.set_write_options(write_opt)
 
         def put(
-            self, key: Key, value: Any, write_opt: WriteOptions | None = None
+            self,
+            key: Key,
+            value: Any,
+            write_opt: WriteOptions | None = None,
         ) -> None:
             """Put item in database using key."""
             return self.db.put(key, value, write_opt)
@@ -237,7 +242,9 @@ if rocksdict_available:
             return self.db.get_entity(key, default, read_opt)
 
         def delete(
-            self, key: Key, write_opt: WriteOptions | None = None
+            self,
+            key: Key,
+            write_opt: WriteOptions | None = None,
         ) -> None:
             """Delete item from database."""
             return self.db.delete(key, write_opt)
@@ -303,9 +310,10 @@ if rocksdict_available:
         def ingest_external_file(
             self,
             paths: list[str],
-            opts: IngestExternalFileOptions = IngestExternalFileOptions(),
+            opts: IngestExternalFileOptions | None = None,
         ) -> None:
             """Load list of SST files into current column family."""
+            opts = opts or IngestExternalFileOptions()
             return self.db.ingest_external_file(paths, opts)
 
         def get_column_family(self, name: str) -> Rdict:
@@ -321,13 +329,19 @@ if rocksdict_available:
             return self.db.drop_column_family(name)
 
         def create_column_family(
-            self, name: str, options: Options = Options()
+            self,
+            name: str,
+            options: Options | None = None,
         ) -> Rdict:
             """Craete column family."""
+            options = options or Options()
             return self.db.create_column_family(name, options)
 
         def delete_range(
-            self, begin: Key, end: Key, write_opt: WriteOptions | None = None
+            self,
+            begin: Key,
+            end: Key,
+            write_opt: WriteOptions | None = None,
         ) -> None:
             """Delete database items, excluding end."""
             return self.db.delete_range(begin, end, write_opt)
@@ -365,9 +379,12 @@ if rocksdict_available:
             self.db.cancel_all_background(wait)
 
         def list_cf(
-            self, path: str, options: Options = Options()
+            self,
+            path: str,
+            options: Options | None = None,
         ) -> list[str]:
             """List column families."""
+            options = options or Options()
             return self.db.list_cf(path, options)
 
         def live_files(self) -> list[dict[str, Any]]:
@@ -378,9 +395,10 @@ if rocksdict_available:
             self,
             begin: Key | None,
             end: Key | None,
-            compact_opt: CompactOptions = CompactOptions(),
+            compact_opt: CompactOptions | None = None,
         ) -> None:
             """Run manual compaction on range for the current column family."""
+            compact_opt = compact_opt or CompactOptions()
             return self.db.compact_range(begin, end, compact_opt)
 
         def close(self) -> None:
@@ -403,10 +421,12 @@ if rocksdict_available:
             """Manually flush the WAL buffer."""
             return self.db.flush_wal(sync)
 
-        def repair(self, path: str, options: Options = Options()) -> None:
+        def repair(self, path: str, options: Options | None = None) -> None:
             """Repair the database."""
+            options = options or Options()
             self.db.repair(path, options)
 
-        def destroy(self, options: Options = Options()) -> None:
+        def destroy(self, options: Options | None = None) -> None:
             """Delete the database."""
+            options = options or Options()
             return Rdict.destroy(self.name, options)

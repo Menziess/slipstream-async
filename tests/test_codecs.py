@@ -3,7 +3,7 @@
 from slipstream.codecs import JsonCodec
 
 
-def test_JsonCodec():
+def test_jsoncodec():
     """Should both serialize and deserialize messages."""
     c = JsonCodec()
     serialized = b'{"msg": "hi"}'

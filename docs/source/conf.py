@@ -12,7 +12,7 @@ from time import strftime
 project = 'Slipstream'
 html_title = project
 author = 'Menziess'
-copyright = f'{strftime("%Y")}, {author}'
+copyright = f'{strftime("%Y")}, {author}'  # noqa: A001
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

@@ -1,12 +1,14 @@
 """Checkpointing tests."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from conftest import emoji, iterable_to_async
 
 from slipstream.checkpointing import Checkpoint, Dependency
 from slipstream.core import Signal
+
+UTC = timezone.utc
 
 
 @pytest.fixture
@@ -20,10 +22,14 @@ def checkpoint(mock_cache):
     """Checkpoint instance."""
 
     async def dependent():
-        yield {'event_timestamp': datetime(2025, 1, 1, 10)}
+        yield {
+            'event_timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC),
+        }
 
     async def dependency():
-        yield {'event_timestamp': datetime(2025, 1, 1, 10)}
+        yield {
+            'event_timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC),
+        }
 
     dep = Dependency('dependency', dependency())
 
@@ -35,16 +41,19 @@ def test_dependency_init(dependency):
     assert dependency.name == 'emoji'
     assert dependency.checkpoint_state is None
     assert dependency.checkpoint_marker is None
-    assert isinstance(dependency._downtime_threshold, timedelta)
+    assert isinstance(dependency.downtime_threshold, timedelta)
     assert dependency.is_down is False
 
 
 def test_dependency_save_and_load(mock_cache, dependency):
     """Should save and load dependency using cache."""
     checkpoint_state = {'offset': 1}
-    checkpoint_marker = datetime(2025, 1, 1, 10)
+    checkpoint_marker = datetime(2025, 1, 1, 10, tzinfo=UTC)
     dependency.save(
-        mock_cache, '_prefix_', checkpoint_state, checkpoint_marker
+        mock_cache,
+        '_prefix_',
+        checkpoint_state,
+        checkpoint_marker,
     )
 
     loaded_dep = Dependency('emoji', iterable_to_async([]))
@@ -59,13 +68,13 @@ async def test_default_downtime_check(dependency):
     """Should check for datetime diff surpassing threshold."""
     checkpoint = Checkpoint('test', iterable_to_async([]), [dependency])
 
-    with pytest.raises(ValueError):
-        checkpoint.state_marker = 'not-datetime'
-        dependency.checkpoint_marker = 'not-datetime'
+    checkpoint.state_marker = 'not-datetime'
+    dependency.checkpoint_marker = 'not-datetime'
+    with pytest.raises(TypeError, match='Expecting either `datetime`'):
         dependency._default_downtime_check(checkpoint, dependency)
 
-    checkpoint.state_marker = datetime(2025, 1, 1, 11)
-    dependency.checkpoint_marker = datetime(2025, 1, 1, 10)
+    checkpoint.state_marker = datetime(2025, 1, 1, 11, tzinfo=UTC)
+    dependency.checkpoint_marker = datetime(2025, 1, 1, 10, tzinfo=UTC)
     downtime = dependency._default_downtime_check(checkpoint, dependency)
     assert isinstance(downtime, timedelta)
     assert downtime == timedelta(hours=1)
@@ -76,13 +85,13 @@ async def test_default_recovery_check(dependency):
     """Should check surpassing datetime is true."""
     checkpoint = Checkpoint('test', iterable_to_async([]), [dependency])
 
-    with pytest.raises(ValueError):
-        checkpoint.state_marker = 'not-datetime'
-        dependency.checkpoint_marker = 'not-datetime'
+    checkpoint.state_marker = 'not-datetime'
+    dependency.checkpoint_marker = 'not-datetime'
+    with pytest.raises(TypeError, match='Expecting either `datetime`'):
         dependency._default_recovery_check(checkpoint, dependency)
 
-    checkpoint.state_marker = datetime(2025, 1, 1, 10)
-    dependency.checkpoint_marker = datetime(2025, 1, 1, 11)
+    checkpoint.state_marker = datetime(2025, 1, 1, 10, tzinfo=UTC)
+    dependency.checkpoint_marker = datetime(2025, 1, 1, 11, tzinfo=UTC)
     recovered = dependency._default_recovery_check(checkpoint, dependency)
     assert recovered is True
 
@@ -99,7 +108,7 @@ def test_checkpoint_init(checkpoint):
 @pytest.mark.asyncio
 async def test_heartbeat_single_dependency(checkpoint):
     """Should correctly update dependency data."""
-    marker = datetime(2025, 1, 1, 10, 30)
+    marker = datetime(2025, 1, 1, 10, 30, tzinfo=UTC)
     await checkpoint.heartbeat(marker)
 
     with pytest.raises(KeyError):
@@ -114,19 +123,23 @@ async def test_heartbeat_single_dependency(checkpoint):
 async def test_heartbeat_multiple_dependencies_error(checkpoint):
     """Should warn about missing argument."""
     checkpoint.dependencies['extra'] = Dependency(
-        'extra', iterable_to_async([])
+        'extra',
+        iterable_to_async([]),
     )
     with pytest.raises(ValueError, match='`dependency_name` must be provided'):
-        await checkpoint.heartbeat(datetime(2025, 1, 1, 10))
+        await checkpoint.heartbeat(
+            datetime(2025, 1, 1, 10, tzinfo=UTC),
+        )
 
 
 @pytest.mark.asyncio
 async def test_heartbeat_with_dependency_name(checkpoint):
     """Should correctly update dependency data."""
     checkpoint.dependencies['extra'] = Dependency(
-        'extra', iterable_to_async([])
+        'extra',
+        iterable_to_async([]),
     )
-    marker = datetime(2025, 1, 1, 10, 30)
+    marker = datetime(2025, 1, 1, 10, 30, tzinfo=UTC)
     await checkpoint.heartbeat(marker, 'dependency')
 
     dep = checkpoint['dependency']
@@ -137,7 +150,7 @@ async def test_heartbeat_with_dependency_name(checkpoint):
 @pytest.mark.asyncio
 async def test_check_pulse_initial_state(checkpoint):
     """Should update dependency and checkpoint data."""
-    marker = datetime(2025, 1, 1, 10)
+    marker = datetime(2025, 1, 1, 10, tzinfo=UTC)
     await checkpoint.check_pulse(marker, offset=0)
 
     dep = checkpoint['dependency']
@@ -155,10 +168,14 @@ async def test_check_pulse_downtime_detected(checkpoint, mocker):
         {str(id(checkpoint.dependent)): mock_iterable},
     )
 
-    await checkpoint.check_pulse(datetime(2025, 1, 1, 10), offset=0)
+    await checkpoint.check_pulse(
+        datetime(2025, 1, 1, 10, tzinfo=UTC),
+        offset=0,
+    )
 
     downtime = await checkpoint.check_pulse(
-        datetime(2025, 1, 1, 10, 30), offset=1
+        datetime(2025, 1, 1, 10, 30, tzinfo=UTC),
+        offset=1,
     )
 
     # Downtime observed, dependent paused
@@ -178,8 +195,14 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
 
     # If no dependency data has ever come in yet, use the first
     # pulse as a checkpoint_marker
-    await checkpoint.check_pulse(datetime(2025, 1, 1, 10), offset=0)
-    await checkpoint.check_pulse(datetime(2025, 1, 1, 11), offset=1)
+    await checkpoint.check_pulse(
+        datetime(2025, 1, 1, 10, tzinfo=UTC),
+        offset=0,
+    )
+    await checkpoint.check_pulse(
+        datetime(2025, 1, 1, 11, tzinfo=UTC),
+        offset=1,
+    )
 
     # Even though no dependency data has come in yet, it's already
     # marked as down using the fact that the dependent stream has
@@ -188,16 +211,20 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
 
     # When data does come in, and it's late (or still catching up)
     # we can observe this in the latency info
-    latency_info = await checkpoint.heartbeat(datetime(2025, 1, 1, 10, 30))
+    latency_info = await checkpoint.heartbeat(
+        datetime(2025, 1, 1, 10, 30, tzinfo=UTC),
+    )
     assert latency_info.get('is_late') is True
 
     conf_mock = mocker.patch('slipstream.Conf', autospec=True)
     conf_mock.return_value.iterables = {
-        str(id(checkpoint.dependent)): mocker.MagicMock()
+        str(id(checkpoint.dependent)): mocker.MagicMock(),
     }
 
     # Latency info shows that the dependency stream has caught up
-    latency_info = await checkpoint.heartbeat(datetime(2025, 1, 1, 11, 1))
+    latency_info = await checkpoint.heartbeat(
+        datetime(2025, 1, 1, 11, 1, tzinfo=UTC),
+    )
     assert latency_info.get('is_late') is False
 
     # Recovery observed, dependent resumed
@@ -220,16 +247,26 @@ async def test_custom_callbacks(is_async, checkpoint, mocker):
     checkpoint._recovery_callback = recovery_callback
 
     # Trigger downtime
-    await checkpoint.check_pulse(datetime(2025, 1, 1, 10), state={'offset': 0})
-    await checkpoint.check_pulse(datetime(2025, 1, 1, 11), state={'offset': 1})
+    await checkpoint.check_pulse(
+        datetime(2025, 1, 1, 10, tzinfo=UTC),
+        state={'offset': 0},
+    )
+    await checkpoint.check_pulse(
+        datetime(2025, 1, 1, 11, tzinfo=UTC),
+        state={'offset': 1},
+    )
     downtime_callback.assert_called_once_with(
-        checkpoint, checkpoint['dependency']
+        checkpoint,
+        checkpoint['dependency'],
     )
 
     # Trigger recovery
-    await checkpoint.heartbeat(datetime(2025, 1, 1, 11, 1))
+    await checkpoint.heartbeat(
+        datetime(2025, 1, 1, 11, 1, tzinfo=UTC),
+    )
     recovery_callback.assert_called_once_with(
-        checkpoint, checkpoint['dependency']
+        checkpoint,
+        checkpoint['dependency'],
     )
 
 

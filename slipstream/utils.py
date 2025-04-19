@@ -6,6 +6,7 @@ from enum import Enum
 from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
+    ClassVar,
     TypeAlias,
 )
 
@@ -27,13 +28,12 @@ class Signal(Enum):
 
 
 def iscoroutinecallable(o: Any) -> bool:
-    """Check whether function is coroutine."""
-    return iscoroutinefunction(o) or (
-        hasattr(o, '__call__') and iscoroutinefunction(o.__call__)
-    )
+    """Check whether object is coroutine."""
+    call = o.__call__ if callable(o) else None  # type: ignore[attr-defined]
+    return iscoroutinefunction(o) or iscoroutinefunction(call)
 
 
-def get_param_names(o: Any):
+def get_param_names(o: Any) -> tuple[str, ...]:
     """Return function parameter names."""
     params = signature(o).parameters
     return tuple(params.keys())
@@ -42,9 +42,9 @@ def get_param_names(o: Any):
 class Singleton(type):
     """Maintain a single instance of a class."""
 
-    _instances: dict['Singleton', Any] = {}
+    _instances: ClassVar[dict['Singleton', Any]] = {}
 
-    def __call__(cls, *args: Any, **kwargs: Any):
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
         """Apply metaclass singleton action."""
         if cls not in cls._instances:
             cls._instances[cls] = super().__call__(*args, **kwargs)
@@ -57,7 +57,7 @@ class Singleton(type):
 class PubSub(metaclass=Singleton):
     """Singleton publish subscribe pattern class."""
 
-    _topics: dict[str, list[AsyncCallable]] = {}
+    _topics: ClassVar[dict[str, list[AsyncCallable]]] = {}
 
     def subscribe(self, topic: str, listener: AsyncCallable) -> None:
         """Subscribe callable to topic."""
@@ -105,7 +105,14 @@ class PubSub(metaclass=Singleton):
 class AsyncSynchronizedGenerator:
     """Async generator that synchronizes values across copies."""
 
-    def __init__(self, gen: AsyncIterable[Any]):
+    __slots__ = ('_cond', '_copies', '_iterator', '_value')
+
+    @property
+    def value(self) -> Any:
+        """Get current value the generator is holding."""
+        return self._value
+
+    def __init__(self, gen: AsyncIterable[Any]) -> None:
         """Create instance of synchronized async generator."""
         self._iterator: AsyncIterator[Any] = aiter(gen)
         self._cond: Condition = Condition()
@@ -119,16 +126,16 @@ class AsyncSynchronizedGenerator:
     async def __anext__(self) -> Any:
         """Return next value from generator if copies are ready."""
         async with self._cond:
-            while any(not copy._is_ready for copy in self._copies):
+            while any(not copy.is_ready for copy in self._copies):
                 await self._cond.wait()
             try:
                 self._value = await self._iterator.__anext__()
                 for copy in self._copies:
-                    copy._is_ready = False
+                    copy.is_ready = False
             except StopAsyncIteration:
                 self._value = Signal.STOP
                 self._cond.notify_all()
-                raise StopAsyncIteration
+                raise
             self._cond.notify_all()
             return self._value
 
@@ -142,7 +149,23 @@ class AsyncSynchronizedGenerator:
 class _GeneratorCopy:
     """Synchronized copy of an async generator."""
 
-    def __init__(self, root: AsyncSynchronizedGenerator, cond: Condition):
+    __slots__ = ('_cond', '_is_ready', '_root')
+
+    @property
+    def is_ready(self) -> bool:
+        """Get readiness status of copy."""
+        return self._is_ready
+
+    @is_ready.setter
+    def is_ready(self, value: bool) -> None:
+        """Set readiness status of copy."""
+        self._is_ready = value
+
+    def __init__(
+        self,
+        root: AsyncSynchronizedGenerator,
+        cond: Condition,
+    ) -> None:
         """Create copy of synchronized async generator."""
         self._root: AsyncSynchronizedGenerator = root
         self._cond: Condition = cond
@@ -155,13 +178,12 @@ class _GeneratorCopy:
     async def __anext__(self) -> Any:
         """Return next value from root generator."""
         async with self._cond:
-            while self._root._value is Signal.SENTINEL or (
-                self._is_ready and self._root._value is not Signal.STOP
+            while self._root.value is Signal.SENTINEL or (
+                self._is_ready and self._root.value is not Signal.STOP
             ):
                 await self._cond.wait()
-            if self._root._value is Signal.STOP:
+            if self._root.value is Signal.STOP:
                 raise StopAsyncIteration
-            else:
-                self._is_ready = True
-                self._cond.notify_all()
-                return self._root._value
+            self._is_ready = True
+            self._cond.notify_all()
+            return self._root.value
