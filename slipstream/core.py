@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import gather, sleep, wait_for
+from asyncio import Event, gather, sleep, wait_for
 from collections.abc import (
     AsyncGenerator,
     AsyncIterable,
@@ -81,10 +81,16 @@ class PausableStream:
         self._iterable: AsyncIterable[Any] = it
         self._iterator: AsyncIterator[Any] | None = None
         self.signal: Signal | Any = None
+        self.running: Event = Event()
+        self.running.set()
 
     def send_signal(self, signal: Signal | Any) -> None:
         """Send signal to stream."""
         self.signal = signal
+        if signal is Signal.PAUSE and self.running.is_set():
+            self.running.clear()
+        elif signal is Signal.RESUME and not self.running.is_set():
+            self.running.set()
 
     def __aiter__(self) -> AsyncIterator[Any]:
         """Create iterator."""
@@ -114,13 +120,13 @@ class PausableStream:
                 if msg is not Signal.SENTINEL:
                     # Otherwise we assume that the generator does not
                     # handle the pause, so we pause here
-                    while self.signal is Signal.PAUSE:
-                        await sleep(0.1)
+                    if not self.running.is_set():
+                        await self.running.wait()
                     return msg
         else:
             msg = await anext(it)
-            while self.signal is Signal.PAUSE:
-                await sleep(0.1)
+            if not self.running.is_set():
+                await self.running.wait()
             return msg
 
 
@@ -313,8 +319,7 @@ if aiokafka_available:
             c = Conf()
             c.register_exit_hook(self.exit_hook)
             self.name = name
-            if conf:
-                self.conf = {**c.conf, **conf}
+            self.conf = {**c.conf, **(conf or {})}
             self.starting_offset = offset
             self.codec = codec
             self.dry = dry

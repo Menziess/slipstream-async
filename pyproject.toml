@@ -79,6 +79,7 @@ target-version = 'py310'
 [tool.ruff.lint]
 ignore = [
   'ANN401',  # allow Any type
+  'COM812',  # may conflict with formatter
 ]
 select = [
   'E',       # pycodestyle
@@ -97,7 +98,6 @@ select = [
   'B',       # flake8-bugbear
   'A',       # flake8-builtins
   'COM',     # flake8-commas
-  'CPY',     # copyright-related rules
   'C4',      # flake8-comprehensions
   'DTZ',     # flake8-datetimez
   'T10',     # flake8-debugger
