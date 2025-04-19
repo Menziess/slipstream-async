@@ -355,10 +355,11 @@ if aiokafka_available:
                     )
                 await sleep(0.1)
             else:
-                raise RuntimeError(
+                err_msg = (
                     f'Failed to assign {partitions} after {timeout}s, '
-                    f'got: {ready_partitions}'
+                    f'got: {ready_partitions}',
                 )
+                raise RuntimeError(err_msg)
 
             # The desired offset per partition
             offsets = (
@@ -442,11 +443,12 @@ if aiokafka_available:
                     **kwargs,
                 )
             except Exception as e:
-                _logger.error(
-                    f'Error raised while producing to Topic {self.name}: '
+                err_msg = (
+                    f'Error while producing to Topic {self.name}: '
                     f'{e.args[0] if e.args else ""}'
                 )
-                raise
+                _logger.exception(err_msg)
+                raise RuntimeError(err_msg) from e
 
         async def init_generator(
             self,
@@ -491,11 +493,12 @@ if aiokafka_available:
                                 await sleep(3)
 
                 except Exception as e:
-                    _logger.error(
-                        f'Error raised while consuming from Topic '
-                        f'{self.name}: {e.args[0] if e.args else ""}'
+                    err_msg = (
+                        f'Error while consuming from Topic {self.name}: '
+                        f'{e.args[0] if e.args else ""}'
                     )
-                    raise
+                    _logger.exception(err_msg)
+                    raise RuntimeError(err_msg) from e
 
             if not self._generator:
                 self._generator = generator(self.consumer)
