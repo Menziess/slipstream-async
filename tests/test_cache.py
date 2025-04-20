@@ -2,9 +2,17 @@
 
 from asyncio import gather, sleep
 from collections.abc import AsyncIterable, Callable
+from tempfile import TemporaryDirectory
 
 import pytest
-from rocksdict import DbClosedError, ReadOptions, WriteOptions
+from rocksdict import (
+    DbClosedError,
+    Options,
+    ReadOptions,
+    SstFileWriter,
+    WriteBatch,
+    WriteOptions,
+)
 
 from slipstream.caching import Cache
 
@@ -46,6 +54,26 @@ def test_contextmanager_cache():
             cache[key]
     finally:
         cache.destroy()
+
+
+def test_cancel_all_background():
+    """Should cancel background tasks."""
+    with TemporaryDirectory(dir='tests') as tmp:
+        cache = Cache(tmp)
+        cache.snapshot()
+        cache.cancel_all_background()
+
+        with pytest.raises(Exception, match='Shutdown in progress'):
+            cache.close()
+
+
+def test_repair():
+    """Should attempt to repair table."""
+    with TemporaryDirectory(dir='tests') as tmp:
+        cache = Cache(tmp)
+        cache['key'] = 123
+        cache.close()
+        cache.repair(tmp)
 
 
 def test_get_callable(cache):
@@ -97,6 +125,7 @@ def test_wrapper_methods(cache):
     cache.set_read_options(ReadOptions())
     cache.set_write_options(WriteOptions())
 
+    # Basic operations
     cache.put('key', 123)
     assert cache.get('key') == 123
 
@@ -113,3 +142,44 @@ def test_wrapper_methods(cache):
     assert list(cache.entities(from_key='entity')) == [
         ('entity', [('a', 1), ('b', 2)]),
     ]
+
+    path = cache.path()
+    assert path == 'tests/db'
+
+    # Create column family
+    assert cache.create_column_family('my-fam')
+    assert cache.list_cf(path) == ['default', 'my-fam']
+    assert cache.get_column_family_handle('my-fam')
+    assert cache.get_column_family('my-fam')
+    cache.drop_column_family('my-fam')
+    assert cache.list_cf(path) == ['default']
+
+    # Write file and flush
+    assert cache.live_files() == []
+    cache.write(WriteBatch())
+    cache.flush()
+    cache.flush_wal()
+    assert cache.live_files() != []
+
+    # Write external file and ingest
+    with TemporaryDirectory(dir=path) as tmp:
+        dump = tmp + '/dump'
+        fw = SstFileWriter(Options())
+        fw.open(dump)
+        fw['key'] = 123
+        fw.finish()
+
+        cache.ingest_external_file([dump])
+
+    # Delete range
+    assert cache['key'] == 123
+    cache.delete_range(begin='j', end='k')  # [begin, end)
+    assert cache['key'] == 123
+    cache.delete_range(begin='k', end='l')
+    assert cache.get('key') is None
+
+    # Other functionalities
+    assert cache.property_value('rocksdb.live-sst-files-size')
+    assert cache.property_value('rocksdb.background-errors') == '0'
+    cache.set_options({'table_factory.filter_policy.bloom_before_level': '3'})
+    assert cache.latest_sequence_number()
