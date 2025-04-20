@@ -488,64 +488,65 @@ if aiokafka_available:
                 _logger.exception(err_msg)
                 raise RuntimeError(err_msg) from e
 
+        async def _get_generator(
+            self,
+            consumer: AIOKafkaConsumer,
+        ) -> AsyncGenerator[
+            Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
+            bool | None,
+        ]:
+            """Return generator that iterates over messages from topic."""
+            signal = None
+            try:
+                msg: ConsumerRecord[Any, Any]
+                async for msg in consumer:
+                    if isinstance(msg.key, bytes) and not self.conf.get(
+                        'key_deserializer',
+                    ):
+                        msg.key = msg.key.decode()
+                    if isinstance(msg.value, bytes) and not self.conf.get(
+                        'value_deserializer',
+                    ):
+                        msg.value = msg.value.decode()
+
+                    signal = yield msg
+
+                    if signal is Signal.PAUSE:
+                        # Future calls to `getmany` will not return
+                        # any records from these partitions until
+                        # they have been resumed using `resume`
+                        consumer.pause(*consumer.assignment())
+                        _logger.debug(f'{self.name} paused')
+                        while True:
+                            signal = yield Signal.SENTINEL
+                            if signal is Signal.RESUME:
+                                _logger.debug(f'{self.name} reactivated')
+                                consumer.resume(*consumer.assignment())
+                                break
+
+                            # Send heartbeats through `getmany`
+                            await consumer.getmany()
+                            await sleep(3)
+
+            except Exception as e:
+                err_msg = (
+                    f'Error while consuming from Topic {self.name}: '
+                    f'{e.args[0] if e.args else ""}'
+                )
+                _logger.exception(err_msg)
+                raise RuntimeError(err_msg) from e
+
         async def init_generator(
             self,
         ) -> AsyncGenerator[
             Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
             bool | None,
         ]:
-            """Iterate over messages from topic."""
+            """Initialize generator."""
             if not self.consumer:
                 self.consumer = await self.get_consumer()
-
-            async def generator(
-                consumer: AIOKafkaConsumer,
-            ) -> AsyncGenerator[
-                Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
-                bool | None,
-            ]:
-                signal = None
-                try:
-                    msg: ConsumerRecord[Any, Any]
-                    async for msg in consumer:
-                        if isinstance(msg.key, bytes) and not self.conf.get(
-                            'key_deserializer',
-                        ):
-                            msg.key = msg.key.decode()
-                        if isinstance(msg.value, bytes) and not self.conf.get(
-                            'value_deserializer',
-                        ):
-                            msg.value = msg.value.decode()
-
-                        signal = yield msg
-
-                        if signal is Signal.PAUSE:
-                            # Future calls to `getmany` will not return
-                            # any records from these partitions until
-                            # they have been resumed using `resume`
-                            consumer.pause(*consumer.assignment())
-                            _logger.debug(f'{self.name} paused')
-                            while True:
-                                signal = yield Signal.SENTINEL
-                                if signal is Signal.RESUME:
-                                    _logger.debug(f'{self.name} reactivated')
-                                    consumer.resume(*consumer.assignment())
-                                    break
-
-                                # Send heartbeats through `getmany`
-                                await consumer.getmany()
-                                await sleep(3)
-
-                except Exception as e:
-                    err_msg = (
-                        f'Error while consuming from Topic {self.name}: '
-                        f'{e.args[0] if e.args else ""}'
-                    )
-                    _logger.exception(err_msg)
-                    raise RuntimeError(err_msg) from e
-
             if not self._generator:
-                self._generator = generator(self.consumer)
+                self._generator = self._get_generator(self.consumer)
             return self._generator
 
         async def __aiter__(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
@@ -609,6 +610,7 @@ async def _sink_output(
     s: AsyncCallable,
     output: Any,
 ) -> None:
+    """Sink output depending on sink type."""
     is_coroutine = iscoroutinecallable(s)
     known_sinks = (Topic, ICache) if aiokafka_available else (ICache,)
     if isinstance(s, known_sinks) and not isinstance(output, tuple):
@@ -620,6 +622,65 @@ async def _sink_output(
         await s(output)
     else:
         s(output)
+
+
+def _get_processor(
+    f: AsyncCallable,
+    is_asyncgen: bool,
+    sink: Iterable[Callable | AsyncCallable],
+) -> AsyncCallable:
+    """Process output depending on output type."""
+
+    async def _process_output(output: Any) -> None:
+        """Process and route output to sinks."""
+        if is_asyncgen:
+            async for val in cast('AsyncIterator[Any]', output):
+                for s in sink:
+                    await _sink_output(f, s, val)
+        elif isinstance(output, Generator):
+            for val in cast('Generator[Any, Any, Any]', output):
+                for s in sink:
+                    await _sink_output(f, s, val)
+        else:
+            for s in sink:
+                await _sink_output(f, s, output)
+
+    return _process_output
+
+
+def _get_handler(
+    f: AsyncCallable, sink: Iterable[Callable | AsyncCallable]
+) -> Callable[..., Awaitable[Any]]:
+    """Get handler wrapper depending on handler signature."""
+    params = signature(f).parameters.values()
+    has_kwargs = any(p.kind == p.VAR_KEYWORD for p in params)
+    is_coroutine = iscoroutinecallable(f)
+    is_asyncgen = isasyncgenfunction(f)
+
+    _processor = _get_processor(f, is_asyncgen, sink)
+
+    if is_coroutine and not is_asyncgen:
+
+        async def _handler(msg: Any, **kwargs: Any) -> None:
+            """Execute function and handle its output."""
+            output = (
+                await f(msg, **kwargs)
+                if has_kwargs
+                else await f(msg)
+                if params
+                else await f()
+            )
+            await _processor(output)
+    else:
+
+        async def _handler(msg: Any, **kwargs: Any) -> None:
+            """Execute function and handle its output."""
+            output = (
+                f(msg, **kwargs) if has_kwargs else f(msg) if params else f()
+            )
+            await _processor(output)
+
+    return _handler
 
 
 def handle(
@@ -640,45 +701,12 @@ def handle(
     c = Conf()
 
     def _deco(f: AsyncCallable) -> Callable[..., Awaitable[Any]]:
-        parameters = signature(f).parameters.values()
-        is_coroutine = iscoroutinecallable(f)
-        is_asyncgen = isasyncgenfunction(f)
-
-        async def _handler(msg: Any, **kwargs: Any) -> None:
-            """Pass msg depending on user handler function type."""
-            if is_coroutine and not is_asyncgen:
-                if any(p.kind == p.VAR_KEYWORD for p in parameters):
-                    output = await f(msg, **kwargs)
-                else:
-                    output = await f(msg) if parameters else await f()
-            elif any(p.kind == p.VAR_KEYWORD for p in parameters):
-                output = f(msg, **kwargs)
-            else:
-                output = f(msg) if parameters else f()
-
-            # If function is async generator, loop over yielded values
-            if is_asyncgen:
-                async for val in cast('AsyncIterator[Any]', output):
-                    for s in sink:
-                        await _sink_output(f, s, val)
-                return
-
-            # Process regular generator
-            if isinstance(output, Generator):
-                for val in cast('Generator[Any, Any, Any]', output):
-                    for s in sink:
-                        await _sink_output(f, s, val)
-                return
-
-            # Process return value
-            for s in sink:
-                await _sink_output(f, s, output)
-
+        handler = _get_handler(f, sink)
         for it in iterable:
             iterable_key = str(id(it))
             c.register_iterable(iterable_key, it)
-            c.register_handler(iterable_key, _handler, *pipe)
-        return _handler
+            c.register_handler(iterable_key, handler, *pipe)
+        return handler
 
     return _deco
 
