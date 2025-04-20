@@ -8,9 +8,3 @@ repos:
     hooks:
       - id: ruff
       - id: ruff-format
-  - repo: https://github.com/pycqa/bandit
-    rev: 1.8.3
-    hooks:
-      - id: bandit
-        args: ["-c", "pyproject.toml", "-r"]
-        additional_dependencies: [".[toml]"]

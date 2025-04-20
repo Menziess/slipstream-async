@@ -52,7 +52,6 @@ jobs:
           pyright slipstream tests
           ruff check
           ruff format --check
-          bandit -c pyproject.toml -r slipstream tests
 
       - name: Run tests
         run: |

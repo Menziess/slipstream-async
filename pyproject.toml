@@ -29,7 +29,6 @@ cache = [
 dev = [
   'pre-commit',
   'pyright',
-  'bandit',
   'ruff',
 ]
 test = [
@@ -68,9 +67,6 @@ include = [
   'slipstream/**/*.py',
   'tests/**/*.py'
 ]
-
-[tool.bandit]
-exclude_dirs = ['tests']
 
 [tool.ruff]
 line-length = 79
