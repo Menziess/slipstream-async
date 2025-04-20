@@ -171,6 +171,12 @@ class Conf(metaclass=Singleton):
     ] = {}
     exit_hooks: ClassVar[set[AsyncCallable]] = set()
 
+    def __init__(self, conf: dict[str, Any] | None = None) -> None:
+        """Define init behavior."""
+        self.conf: dict[str, Any] = {}
+        if conf:
+            self.__update__(conf)
+
     def register_iterable(self, key: str, it: AsyncIterable[Any]) -> None:
         """Add iterable to global Conf."""
         self.iterables[key] = PausableStream(it)
@@ -255,12 +261,6 @@ class Conf(metaclass=Singleton):
         async for msg in stream:
             await handler(msg, **kwargs)
 
-    def __init__(self, conf: dict[str, Any] | None = None) -> None:
-        """Define init behavior."""
-        self.conf: dict[str, Any] = {}
-        if conf:
-            self.__update__(conf)
-
     def __update__(self, conf: dict[str, Any] | None = None) -> None:
         """Set default app configuration."""
         if not conf:
@@ -269,6 +269,9 @@ class Conf(metaclass=Singleton):
         for key, value in conf.items():
             key = sub('[^0-9a-zA-Z]+', '_', key)
             setattr(self, key, value)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
 
     def __repr__(self) -> str:
         """Represent config."""

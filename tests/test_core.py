@@ -1,14 +1,99 @@
 """Core tests."""
 
 import logging
-from collections.abc import AsyncIterable, Callable
+from asyncio import gather, sleep
+from collections.abc import AsyncIterable, AsyncIterator, Callable
 
 import pytest
 from conftest import emoji
 from pytest_mock import MockerFixture
 
 from slipstream import Conf
-from slipstream.core import Topic, _sink_output, handle, stream
+from slipstream.core import PausableStream, Topic, _sink_output, handle, stream
+from slipstream.utils import Signal
+
+
+@pytest.mark.asyncio
+async def test_pausablestream():
+    """Should consume data from iterable."""
+    iterable = emoji()
+    stream = PausableStream(iterable)
+    assert stream.iterable == iterable
+    assert stream.signal is None
+    assert stream.running.is_set()
+
+    assert stream._iterator is None
+    assert aiter(stream) == stream
+    assert isinstance(stream._iterator, AsyncIterator)
+
+    assert await anext(stream) == '🏆'
+
+    stream.send_signal(Signal.PAUSE)
+    assert stream.signal is Signal.PAUSE
+    assert not stream.running.is_set()
+
+
+@pytest.mark.asyncio
+async def test_pausablestream_asyncgenerator(mocker: MockerFixture):
+    """Should propagate signal when pausing/resuming generator."""
+    iterable = mocker.Mock()
+    iterable.asend = mocker.AsyncMock(return_value='🏆')
+    iterable.__aiter__ = mocker.Mock(return_value=iterable)
+
+    # A generator yields values
+    stream = PausableStream(iterable)
+    assert aiter(stream) == stream
+    assert await anext(stream) == '🏆'
+
+    # It will also be pausable
+    spy = mocker.spy(stream.running, 'wait')
+    stream.send_signal(Signal.PAUSE)
+
+    # And resumeable
+    async def resume_stream():
+        await sleep(0.1)
+        stream.send_signal(Signal.RESUME)
+
+    await gather(anext(stream), resume_stream())
+    spy.assert_called_once()
+
+    # Signals will be sent to the generator
+    assert await anext(stream) == '🏆'
+    assert iterable.asend.await_args_list == [
+        mocker.call(None),
+        mocker.call(Signal.PAUSE),
+        mocker.call(Signal.RESUME),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pausablestream_iterator(mocker: MockerFixture):
+    """Should not propagate signal when pausing/resuming iterator."""
+    iterable = mocker.Mock()
+    del iterable.asend
+    iterable.__anext__ = mocker.AsyncMock(return_value='🏆')
+    iterable.__aiter__ = mocker.Mock(return_value=iterable)
+
+    # A regular iterator also yields values
+    stream = PausableStream(iterable)
+    assert aiter(stream) == stream
+    assert await anext(stream) == '🏆'
+
+    # It will also be pausable
+    spy = mocker.spy(stream.running, 'wait')
+    stream.send_signal(Signal.PAUSE)
+
+    # And resumeable
+    async def resume_stream():
+        await sleep(0.1)
+        stream.send_signal(Signal.RESUME)
+
+    await gather(anext(stream), resume_stream())
+    spy.assert_called_once()
+
+    # But if will not receive signals
+    assert await anext(stream) == '🏆'
+    iterable.__anext__.assert_called()
 
 
 @pytest.mark.asyncio
@@ -16,7 +101,7 @@ async def test_conf(mocker: MockerFixture) -> None:
     """Should distribute messages in parallel."""
     Conf().iterables = {}
     c = Conf({'group.id': 'test'})
-    assert c.group_id == 'test'  # type: ignore[attr-defined]
+    assert c.group_id == 'test'
     assert c.iterables == {}
 
     # Register iterable
