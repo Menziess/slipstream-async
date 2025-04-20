@@ -2,9 +2,11 @@
 
 from abc import ABCMeta, abstractmethod
 from collections.abc import AsyncIterator
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, TypeVar
 
 from slipstream.utils import PubSub
+
+T = TypeVar('T')
 
 Key: TypeAlias = str | int | float | bytes | bool
 
@@ -26,7 +28,7 @@ class ICodec(metaclass=ABCMeta):
 class CacheMeta(ABCMeta):
     """Metaclass adds default functionality to ICache."""
 
-    def __call__(cls, *args: Any, **kwargs: Any) -> 'ICache':
+    def __call__(cls: type[T], *args: Any, **kwargs: Any) -> T:
         """Adding instance variables."""
         instance = super().__call__(*args, **kwargs)
         if not hasattr(instance, '_pubsub'):
