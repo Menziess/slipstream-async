@@ -97,9 +97,8 @@ async def test_pausablestream_iterator(mocker: MockerFixture):
 
 
 @pytest.mark.asyncio
-async def test_conf(mocker: MockerFixture) -> None:
+async def test_conf(mocker: MockerFixture):
     """Should distribute messages in parallel."""
-    Conf().iterables = {}
     c = Conf({'group.id': 'test'})
     assert c.group_id == 'test'
     assert c.iterables == {}
@@ -128,20 +127,37 @@ async def test_conf(mocker: MockerFixture) -> None:
     ]
 
 
-def test_get_iterable() -> None:
+@pytest.mark.asyncio
+async def test_conf_keyboardinterrupt(mocker: MockerFixture):
+    """Should not raise on KeyboardInterrupt."""
+    awaitable = mocker.AsyncMock(side_effect=KeyboardInterrupt)
+    mocker.patch('slipstream.core.gather', awaitable)
+    c = Conf()
+
+    # Register iterable
+    iterable = range(1)
+    iterable_key = str(id(iterable))
+    iterable_item = iterable_key, emoji()
+    c.register_iterable(*iterable_item)
+
+    await c.start()
+    awaitable.assert_awaited_once()
+
+
+def test_get_iterable():
     """Should return an interable."""
     t = Topic('test', {'group.id': 'test'})
     assert isinstance(aiter(t), AsyncIterable)
 
 
-def test_get_callable() -> None:
+def test_get_callable():
     """Should return a callable."""
     t = Topic('test', {})
     assert isinstance(t, Callable)
 
 
 @pytest.mark.asyncio
-async def test_call_fail(mocker: MockerFixture, caplog) -> None:
+async def test_call_fail(mocker: MockerFixture, caplog):
     """Should fail to produce message and log an error."""
     mock_producer = mocker.patch(
         'slipstream.core.AIOKafkaProducer',
@@ -168,7 +184,7 @@ async def test_call_fail(mocker: MockerFixture, caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_aiter_fail(mocker, caplog) -> None:
+async def test_aiter_fail(mocker, caplog):
     """Should fail to consume messages and log an error."""
     caplog.set_level(logging.ERROR)
     mock_consumer = mocker.patch(
@@ -187,7 +203,7 @@ async def test_aiter_fail(mocker, caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sink_output(mocker: MockerFixture) -> None:
+async def test_sink_output(mocker: MockerFixture):
     """Should return the output of the sink function."""
 
     def src():
@@ -211,7 +227,7 @@ async def test_sink_output(mocker: MockerFixture) -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle(mocker: MockerFixture) -> None:
+async def test_handle(mocker: MockerFixture):
     """Should decorate handler and register iterables, handlers, pipes."""
 
     async def number():
