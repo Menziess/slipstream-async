@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 from rocksdict import (
+    AccessType,
     DbClosedError,
     Options,
     ReadOptions,
@@ -54,6 +55,21 @@ def test_contextmanager_cache():
             cache[key]
     finally:
         cache.destroy()
+
+
+def test_secondary_db():
+    """Should automatically close cache after use."""
+    with TemporaryDirectory(dir='tests') as tmp:
+        first_path, second_path = tmp + '/first', tmp + '/secondary'
+        first = Cache(first_path)
+        secondary = Cache(
+            first_path, access_type=AccessType.secondary(second_path)
+        )
+        with first, secondary as s:
+            s.try_catch_up_with_primary()
+
+        first.destroy()
+        secondary.destroy()
 
 
 def test_cancel_all_background():
@@ -175,11 +191,12 @@ def test_wrapper_methods(cache):
     assert cache['key'] == 123
     cache.delete_range(begin='j', end='k')  # [begin, end)
     assert cache['key'] == 123
+    cache.compact_range(begin='k', end='l')
     cache.delete_range(begin='k', end='l')
     assert cache.get('key') is None
 
     # Other functionalities
     assert cache.property_value('rocksdb.live-sst-files-size')
-    assert cache.property_value('rocksdb.background-errors') == '0'
+    assert cache.property_int_value('rocksdb.background-errors') == 0
     cache.set_options({'table_factory.filter_policy.bloom_before_level': '3'})
     assert cache.latest_sequence_number()
