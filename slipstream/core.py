@@ -25,6 +25,7 @@ from slipstream.interfaces import ICache, ICodec
 from slipstream.utils import (
     AsyncCallable,
     AsyncSynchronizedGenerator,
+    Pipe,
     PubSub,
     Signal,
     Singleton,
@@ -160,15 +161,7 @@ class Conf(metaclass=Singleton):
 
     pubsub = PubSub()
     iterables: ClassVar[dict[str, PausableStream]] = {}
-    pipes: ClassVar[
-        dict[
-            AsyncCallable,
-            tuple[
-                str,
-                tuple[Callable[[AsyncIterable[Any]], AsyncIterable[Any]], ...],
-            ],
-        ]
-    ] = {}
+    pipes: ClassVar[dict[AsyncCallable, tuple[str, tuple[Pipe, ...]]]] = {}
     exit_hooks: ClassVar[set[AsyncCallable]] = set()
 
     def __init__(self, conf: dict[str, Any] | None = None) -> None:
@@ -185,7 +178,7 @@ class Conf(metaclass=Singleton):
         self,
         key: str,
         handler: AsyncCallable,
-        *pipe: Callable[[AsyncIterable[Any]], AsyncIterable[Any]],
+        *pipe: Pipe,
     ) -> None:
         """Add handler to global Conf."""
         if pipe:
@@ -272,6 +265,14 @@ class Conf(metaclass=Singleton):
 
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self.conf:
+            return self.conf[name]
+        err_msg = (
+            f'"{self.__class__.__name__}" object has no attribute "{name}"'
+        )
+        raise AttributeError(err_msg)
 
     def __repr__(self) -> str:
         """Represent config."""
@@ -688,7 +689,7 @@ def _get_handler(
 
 def handle(
     *iterable: AsyncIterable[Any],
-    pipe: Iterable[AsyncCallable] = [],
+    pipe: Iterable[Pipe] = [],
     sink: Iterable[Callable | AsyncCallable] = [],
 ) -> Callable[[AsyncCallable], Callable[..., Awaitable[Any]]]:
     """Bind sources and sinks to the handler function.

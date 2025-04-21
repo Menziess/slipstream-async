@@ -9,7 +9,7 @@ from slipstream.core import PausableStream
 
 def test_handle():
     """Should register iterable."""
-    Conf().iterables = {}
+    Conf().iterables = {}  # type: ignore[attr-defined]
 
     iterable = iterable_to_async(range(1))
     iterable_key = str(id(iterable))
@@ -24,7 +24,7 @@ def test_handle():
 @pytest.mark.asyncio
 async def test_stream(mocker):
     """Should start distributing messages for each registered iterable."""
-    Conf().iterables = {}
+    Conf().iterables = {}  # type: ignore[attr-defined]
     spy = mocker.spy(Conf(), '_distribute_messages')
 
     it = iterable_to_async(range(1))

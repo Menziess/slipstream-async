@@ -23,13 +23,13 @@ def reset_singletons():
         for topic, listeners in dict(pubsub._topics).items():
             for listener in listeners:
                 pubsub.unsubscribe(topic, listener)
-        pubsub._topics = {}
+        pubsub._topics = {}  # type: ignore[attr-defined]
 
     if Conf in Singleton._instances:
         conf = Conf()
-        conf.iterables = {}
-        conf.pipes = {}
-        conf.exit_hooks = set()
+        conf.iterables = {}  # type: ignore[attr-defined]
+        conf.pipes = {}  # type: ignore[attr-defined]
+        conf.exit_hooks = set()  # type: ignore[attr-defined]
 
 
 if rocksdict_available:

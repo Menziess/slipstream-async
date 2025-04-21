@@ -8,9 +8,13 @@ from typing import (
     Any,
     ClassVar,
     TypeAlias,
+    TypeVar,
 )
 
+T = TypeVar('T')
+
 AsyncCallable: TypeAlias = Callable[..., Awaitable[Any]] | Callable[..., Any]
+Pipe: TypeAlias = Callable[[AsyncIterable[Any]], AsyncIterable[Any]]
 
 
 class Signal(Enum):
@@ -42,13 +46,13 @@ def get_param_names(o: Any) -> tuple[str, ...]:
 class Singleton(type):
     """Maintain a single instance of a class."""
 
-    _instances: ClassVar[dict['Singleton', Any]] = {}
+    _instances: ClassVar[dict[type, Any]] = {}
 
-    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+    def __call__(cls: type[T], *args: Any, **kwargs: Any) -> T:
         """Apply metaclass singleton action."""
-        if cls not in cls._instances:
-            cls._instances[cls] = super().__call__(*args, **kwargs)
-        instance = cls._instances[cls]
+        if cls not in Singleton._instances:
+            Singleton._instances[cls] = super().__call__(*args, **kwargs)
+        instance = Singleton._instances[cls]
         if hasattr(instance, '__update__'):
             instance.__update__(*args, **kwargs)
         return instance
