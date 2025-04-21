@@ -1,3 +1,5 @@
+"""Init tests."""
+
 import pytest
 from conftest import iterable_to_async
 
@@ -7,7 +9,7 @@ from slipstream.core import PausableStream
 
 def test_handle():
     """Should register iterable."""
-    Conf().iterables = {}
+    Conf().iterables = {}  # type: ignore[attr-defined]
 
     iterable = iterable_to_async(range(1))
     iterable_key = str(id(iterable))
@@ -22,7 +24,7 @@ def test_handle():
 @pytest.mark.asyncio
 async def test_stream(mocker):
     """Should start distributing messages for each registered iterable."""
-    Conf().iterables = {}
+    Conf().iterables = {}  # type: ignore[attr-defined]
     spy = mocker.spy(Conf(), '_distribute_messages')
 
     it = iterable_to_async(range(1))
@@ -37,14 +39,12 @@ async def test_stream(mocker):
 @pytest.mark.asyncio
 async def test_kwargable_function():
     """Should try to pass kwargs to user defined handler function."""
-    my_kwargs = {
-        'my_kwarg': 'kwarg value'
-    }
+    my_kwargs = {'my_kwarg': 'kwarg value'}
     is_kwargable = False
     is_unkwargable = False
 
     @handle(iterable_to_async(range(1)))
-    def kwargable(msg, **kwargs):
+    def kwargable(_, **kwargs):
         nonlocal is_kwargable
         is_kwargable = kwargs == my_kwargs
 

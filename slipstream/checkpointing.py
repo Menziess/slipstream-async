@@ -1,12 +1,10 @@
 """Slipstream checkpointing."""
 
 import logging
+from collections.abc import AsyncIterable, Callable, Generator
 from datetime import datetime, timedelta
 from typing import (
     Any,
-    AsyncIterable,
-    Callable,
-    Optional,
 )
 
 from slipstream.core import Conf, Signal
@@ -36,22 +34,32 @@ class Dependency:
     {'checkpoint_state': None, 'checkpoint_marker': None}
     """
 
+    @property
+    def downtime_check(self) -> Callable[['Checkpoint', 'Dependency'], Any]:
+        """Is called when downtime is detected."""
+        return self._downtime_check
+
+    @property
+    def recovery_check(self) -> Callable[['Checkpoint', 'Dependency'], bool]:
+        """Is called when downtime is resolved."""
+        return self._recovery_check
+
     def __init__(
         self,
         name: str,
         dependency: AsyncIterable[Any],
         downtime_threshold: Any = timedelta(minutes=10),
-        downtime_check: Optional[Callable[[
-            'Checkpoint', 'Dependency'], Any]] = None,
-        recovery_check: Optional[Callable[[
-            'Checkpoint', 'Dependency'], bool]] = None,
-    ):
+        downtime_check: Callable[['Checkpoint', 'Dependency'], Any]
+        | None = None,
+        recovery_check: Callable[['Checkpoint', 'Dependency'], bool]
+        | None = None,
+    ) -> None:
         """Initialize dependency for checkpointing."""
         self.name = name
         self.dependency = dependency
         self.checkpoint_state = None
         self.checkpoint_marker = None
-        self._downtime_threshold = downtime_threshold
+        self.downtime_threshold = downtime_threshold
         self._downtime_check = downtime_check or self._default_downtime_check
         self._recovery_check = recovery_check or self._default_recovery_check
         self.is_down = False
@@ -61,8 +69,8 @@ class Dependency:
         cache: ICache,
         cache_key_prefix: str,
         checkpoint_state: Any,
-        checkpoint_marker: datetime
-    ):
+        checkpoint_marker: datetime,
+    ) -> None:
         """Save checkpoint state to cache."""
         key = f'{cache_key_prefix}{self.name}_'
         cache[key + CHECKPOINT_STATE_NAME] = checkpoint_state
@@ -77,8 +85,8 @@ class Dependency:
     @staticmethod
     def _default_downtime_check(
         c: 'Checkpoint',
-        d: 'Dependency'
-    ) -> Optional[timedelta]:
+        d: 'Dependency',
+    ) -> timedelta | None:
         """Determine dependency downtime by comparing event timestamps.
 
         This behavior can be overridden by passing a callable to
@@ -88,14 +96,15 @@ class Dependency:
             isinstance(c.state_marker, datetime)
             and isinstance(d.checkpoint_marker, datetime)
         ):
-            raise ValueError(
+            err_msg = (
                 'Expecting either `datetime` markers in heartbeat and '
                 'check_pulse, or a custom downtime_check in dependency, '
                 f'got; {c.state_marker} and {d.checkpoint_marker}'
             )
+            raise TypeError(err_msg)
 
         diff = c.state_marker - d.checkpoint_marker
-        if diff > d._downtime_threshold:
+        if diff > d.downtime_threshold:
             return diff
         return None
 
@@ -110,20 +119,23 @@ class Dependency:
             isinstance(c.state_marker, datetime)
             and isinstance(d.checkpoint_marker, datetime)
         ):
-            raise ValueError(
+            err_msg = (
                 'Expecting either `datetime` markers in heartbeat and '
                 'check_pulse, or a custom recovery_check in dependency, '
                 f'got; {c.state_marker} and {d.checkpoint_marker}'
             )
+            raise TypeError(err_msg)
 
         return d.checkpoint_marker > c.state_marker
 
-    def __iter__(self):
+    def __iter__(self) -> Generator[tuple[str, Any | None], None, None]:
         """Get relevant values when dict is called."""
-        yield from ({
-            CHECKPOINT_STATE_NAME: self.checkpoint_state,
-            CHECKPOINT_MARKER_NAME: self.checkpoint_marker,
-        }.items())
+        yield from (
+            {
+                CHECKPOINT_STATE_NAME: self.checkpoint_state,
+                CHECKPOINT_MARKER_NAME: self.checkpoint_marker,
+            }.items()
+        )
 
     def __repr__(self) -> str:
         """Represent checkpoint."""
@@ -145,8 +157,9 @@ class Checkpoint:
     they are used to persist the checkpoint in the cache.
 
     >>> c = Checkpoint(
-    ...     'dependent', dependent=dependent,
-    ...     dependencies=[Dependency('dependency', dependency)]
+    ...     'dependent',
+    ...     dependent=dependent,
+    ...     dependencies=[Dependency('dependency', dependency)],
     ... )
 
     Checkpoints automatically handle pausing of dependent streams
@@ -212,20 +225,19 @@ class Checkpoint:
         name: str,
         dependent: AsyncIterable[Any],
         dependencies: list[Dependency],
-        downtime_callback: Optional[Callable[[
-            'Checkpoint', Dependency], Any]] = None,
-        recovery_callback: Optional[Callable[[
-            'Checkpoint', Dependency], Any]] = None,
-        cache: Optional[ICache] = None,
+        downtime_callback: Callable[['Checkpoint', Dependency], Any]
+        | None = None,
+        recovery_callback: Callable[['Checkpoint', Dependency], Any]
+        | None = None,
+        cache: ICache | None = None,
         cache_key_prefix: str = '_',
-        pause_dependent: bool = True
-    ):
+        pause_dependent: bool = True,
+    ) -> None:
         """Create instance that tracks downtime of dependency streams."""
         self.name = name
         self.dependent = dependent
         self.dependencies: dict[str, Dependency] = {
-            dependency.name: dependency
-            for dependency in dependencies
+            dependency.name: dependency for dependency in dependencies
         }
         self.pause_dependent = pause_dependent
         self._cache = cache
@@ -238,17 +250,17 @@ class Checkpoint:
 
         # Load checkpoint state from cache
         if self._cache:
-            self.state = self._cache[
-                f'{self._cache_key}_{STATE_NAME}'] or {}
+            self.state = self._cache[f'{self._cache_key}_{STATE_NAME}'] or {}
             self.state_marker = self._cache[
-                f'{self._cache_key}_{STATE_MARKER_NAME}']
+                f'{self._cache_key}_{STATE_MARKER_NAME}'
+            ]
             for dependency in self.dependencies.values():
                 dependency.load(self._cache, self._cache_key)
 
     async def heartbeat(
         self,
         marker: datetime | Any,
-        dependency_name: Optional[str] = None,
+        dependency_name: str | None = None,
     ) -> dict:
         """Update checkpoint to latest state.
 
@@ -260,24 +272,27 @@ class Checkpoint:
         """
         if dependency_name:
             if not (dependency := self.dependencies.get(dependency_name)):
-                raise KeyError('Dependency does not exist.')
+                err_msg = 'Dependency does not exist.'
+                raise KeyError(err_msg)
         elif len(self.dependencies) == 1:
             dependency = next(iter(self.dependencies.values()))
         else:
-            raise ValueError(
+            err_msg = (
                 'Argument `dependency_name` must be provided '
                 'for checkpoint with multiple dependencies.'
             )
+            raise ValueError(err_msg)
 
         self._save_checkpoint(dependency, self.state, marker)
 
         if dependency.is_down:
-            if dependency._recovery_check(self, dependency):
+            if dependency.recovery_check(self, dependency):
                 dependency.is_down = False
 
             if not any(_.is_down for _ in self.dependencies.values()):
                 _logger.debug(
-                    f'Dependency "{dependency.name}" downtime resolved')
+                    f'Dependency "{dependency.name}" downtime resolved',
+                )
                 key, c = str(id(self.dependent)), Conf()
                 if self.pause_dependent and key in c.iterables:
                     c.iterables[key].send_signal(Signal.RESUME)
@@ -296,16 +311,16 @@ class Checkpoint:
     async def check_pulse(
         self,
         marker: datetime | Any,
-        **kwargs: Any
-    ) -> Optional[Any]:
+        **kwargs: Any,
+    ) -> Any | None:
         """Update state that can be used as checkpoint.
 
         Args:
             marker (datetime | Any): Typically the event timestamp that is
                 compared to the event timestamp of a dependency stream.
-            state (Any): Any information that can be used for reprocessing any
+            kwargs (Any): Any information that can be used for reprocessing any
                 incorrect data that was sent out during downtime of a
-                dependency stream (offsets for example).
+                dependency stream, stored in `state`.
 
         Returns:
             Any: Typically the timedelta between the last state_marker and
@@ -316,21 +331,22 @@ class Checkpoint:
         downtime = None
 
         for dependency in self.dependencies.values():
-
             # When the dependency stream hasn't had any message yet
             # set the checkpoint to the very first available state
             if not dependency.checkpoint_marker:
                 self._save_checkpoint(
                     dependency,
                     self.state,
-                    self.state_marker
+                    self.state_marker,
                 )
 
             # Trigger on the first dependency that is down and
             # pause the dependent stream
-            if downtime := dependency._downtime_check(self, dependency):
-                _logger.debug(
-                    f'Downtime of dependency "{dependency.name}" detected')
+            if downtime := dependency.downtime_check(self, dependency):
+                log_msg = (
+                    f'Downtime of dependency "{dependency.name}" detected'
+                )
+                _logger.debug(log_msg)
                 key, c = str(id(self.dependent)), Conf()
                 if self.pause_dependent and key in c.iterables:
                     c.iterables[key].send_signal(Signal.PAUSE)
@@ -343,26 +359,22 @@ class Checkpoint:
 
         if any(_.is_down for _ in self.dependencies.values()):
             return downtime
+        return None
 
-    def _save_state(
-        self,
-        state_marker: datetime | Any,
-        **kwargs: Any
-    ) -> None:
+    def _save_state(self, state_marker: datetime | Any, **kwargs: Any) -> None:
         """Save state of the stream (to cache)."""
         self.state.update(**kwargs)
         self.state_marker = state_marker
         if not self._cache:
             return
         self._cache[f'{self._cache_key}_state'] = self.state
-        self._cache[
-            f'{self._cache_key}_state_marker'] = self.state_marker
+        self._cache[f'{self._cache_key}_state_marker'] = self.state_marker
 
     def _save_checkpoint(
         self,
         dependency: Dependency,
         checkpoint_state: Any,
-        checkpoint_marker: datetime | Any
+        checkpoint_marker: datetime | Any,
     ) -> None:
         """Save state of the dependency checkpoint (to cache)."""
         dependency.checkpoint_state = checkpoint_state
@@ -370,24 +382,25 @@ class Checkpoint:
         if not self._cache:
             return
         dependency.save(
-            self._cache, self._cache_key,
-            checkpoint_state, checkpoint_marker)
+            self._cache,
+            self._cache_key,
+            checkpoint_state,
+            checkpoint_marker,
+        )
 
     def __getitem__(self, key: str) -> Dependency:
         """Get dependency from dependencies."""
         return self.dependencies[key]
 
-    def __iter__(self):
-        """Get relevant values when dict is called."""
-        yield from ({
-            STATE_NAME: self.state,
-            STATE_MARKER_NAME: self.state_marker,
-            CHECKPOINTS_NAME: {
-                dependency.name: dict(dependency)
-                for dependency in self.dependencies.values()
-            }
-        }.items())
-
     def __repr__(self) -> str:
         """Represent checkpoint."""
-        return str(dict(self))
+        return str(
+            {
+                STATE_NAME: self.state,
+                STATE_MARKER_NAME: self.state_marker,
+                CHECKPOINTS_NAME: {
+                    dependency.name: dict(dependency)
+                    for dependency in self.dependencies.values()
+                },
+            },
+        )

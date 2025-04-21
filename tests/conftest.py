@@ -2,43 +2,48 @@
 
 import signal
 from asyncio import sleep
+from collections.abc import AsyncIterable, Generator, Iterable
 from contextlib import contextmanager
-from typing import Any, AsyncIterable, Iterable, Iterator
+from typing import Any
 
-from pytest import fixture
+import pytest
 from testcontainers.kafka import KafkaContainer
 
+from slipstream import Cache
 from slipstream.core import Conf
 from slipstream.interfaces import ICache, Key
-from slipstream.utils import Singleton
+from slipstream.utils import PubSub, Singleton
 
 
-@fixture(autouse=True, scope='module')
-def reset_Conf():
-    """Clean Conf singleton each test."""
+@pytest.fixture(autouse=True)
+def reset_singletons():
+    """Clean singletons each test."""
+    if PubSub in Singleton._instances:
+        pubsub = PubSub()
+        for topic, listeners in dict(pubsub._topics).items():
+            for listener in listeners:
+                pubsub.unsubscribe(topic, listener)
+        pubsub._topics = {}  # type: ignore[attr-defined]
+
     if Conf in Singleton._instances:
-        del Singleton._instances[Conf]
+        conf = Conf()
+        conf.iterables = {}  # type: ignore[attr-defined]
+        conf.pipes = {}  # type: ignore[attr-defined]
+        conf.exit_hooks = set()  # type: ignore[attr-defined]
 
 
-try:
-    from slipstream import Cache
-
-    @fixture
-    def cache() -> Iterator[Cache]:
-        """Get Cache instance that automatically cleans itself."""
-        c = Cache('tests/db')
-        try:
-            yield c
-        except Exception as e:
-            raise e
-        finally:
-            c.close()
-            c.destroy()
-except ImportError:
-    pass
+@pytest.fixture
+def cache() -> Generator[Cache, None]:
+    """Get Cache instance that automatically cleans itself."""
+    c = Cache('tests/db')
+    try:
+        yield c
+    finally:
+        c.close()
+        c.destroy()
 
 
-@fixture(scope='session')
+@pytest.fixture(scope='session')
 def kafka():
     """Get running kafka broker."""
     kafka = KafkaContainer().with_kraft()
@@ -49,13 +54,15 @@ def kafka():
         kafka.stop()
 
 
-@fixture
+@pytest.fixture
 def timeout():
     """Contextmanager that will stop execution of body."""
+
     @contextmanager
     def set_timeout(seconds: int):
         def raise_timeout(*_):
-            raise TimeoutError(f'Timeout reached: {seconds}.')
+            err_msg = f'Timeout reached: {seconds}.'
+            raise TimeoutError(err_msg)
 
         signal.signal(signal.SIGALRM, raise_timeout)
         signal.alarm(seconds)
@@ -102,7 +109,7 @@ class MockCache(ICache):
         self._store[key] = val
 
 
-@fixture
+@pytest.fixture
 def mock_cache():
     """Get cache for testing."""
     return MockCache()

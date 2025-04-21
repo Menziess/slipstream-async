@@ -1,3 +1,5 @@
+"""Utils tests."""
+
 from asyncio import Condition, gather, sleep
 
 import pytest
@@ -15,6 +17,7 @@ from slipstream.utils import (
 
 
 def test_iscoroutinecallable():
+    """Should check whether function is coroutine."""
 
     def _s():
         return True
@@ -29,10 +32,12 @@ def test_iscoroutinecallable():
     assert not iscoroutinecallable(_s)
     assert iscoroutinecallable(_a)
     assert iscoroutinecallable(_A)
+    assert iscoroutinecallable(_A())
 
 
 def test_get_param_names():
     """Should return all parameter names."""
+
     def f(a, b, c=0, *args, d=0, **kwargs):
         pass
 
@@ -45,8 +50,9 @@ def test_get_param_names():
     assert 'bootstrap_servers' in get_param_names(AIOKafkaClient)
 
 
-def test_Singleton():
+def test_singleton():
     """Should maintain a single instance of a class."""
+
     class MySingleton(metaclass=Singleton):
         def __update__(self):
             pass
@@ -58,7 +64,7 @@ def test_Singleton():
 
 
 @pytest.mark.asyncio
-async def test_PubSub():
+async def test_pubsub():
     """Should succesfully send and receive data."""
     topic, count, msg = 'test_PubSub', 0, {'msg': 'hi'}
 
@@ -94,7 +100,7 @@ async def test_PubSub():
 
 
 @pytest.mark.asyncio
-async def test_AsyncSynchronizedGenerator():
+async def test_asyncsynchronizedgenerator():
     """Should consume and exhaust generator."""
 
     async def numbers(n=1):
@@ -114,9 +120,11 @@ async def test_AsyncSynchronizedGenerator():
     # Copies readiness matches synchronization
     assert await anext(g) == 0
     assert await anext(gc1) == 0
-    assert gc1._is_ready and not gc2._is_ready
+    assert gc1._is_ready
+    assert not gc2._is_ready
     assert await anext(gc2) == 0
-    assert gc1._is_ready and gc2._is_ready
+    assert gc1._is_ready
+    assert gc2._is_ready
 
     # StopAsyncIteration when generator is exhaused
     with pytest.raises(StopAsyncIteration):
@@ -128,7 +136,7 @@ async def test_AsyncSynchronizedGenerator():
 
 
 @pytest.mark.asyncio
-async def test_AsyncSynchronizedGenerator_synchronization(mocker):
+async def test_asyncsynchronizedgenerator_synchronization(mocker):
     """Should synchronize generator root and copies."""
 
     async def numbers(n=5):

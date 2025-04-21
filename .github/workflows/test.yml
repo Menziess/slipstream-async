@@ -49,19 +49,10 @@ jobs:
 
       - name: Run linting
         run: |
-          bandit -c pyproject.toml -r slipstream tests
-          pydocstyle slipstream tests
           pyright slipstream tests
-          flake8 slipstream tests
+          ruff check
+          ruff format --check
 
       - name: Run tests
         run: |
-          pytest slipstream tests --ignore tests/integration/
-
-      - uses: nick-fields/retry@v3
-        name: Run integration tests linux
-        if: ${{ inputs.os == 'ubuntu-latest' }}
-        with:
-          timeout_minutes: 1
-          max_attempts: 3
-          command: pytest tests/integration/
+          pytest slipstream tests --cov=slipstream --cov-report=term-missing
