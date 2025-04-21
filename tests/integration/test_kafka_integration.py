@@ -32,7 +32,7 @@ async def test_produce_consume(kafka):
     await t(b'b', b'b')
     await t(b'c', b'c')
 
-    msg = await next(t)
+    msg = await anext(t)
     assert msg.value == 'a'
 
     expected = ['b', 'c']
@@ -95,7 +95,7 @@ async def test_checkpoint_reprocessing(kafka, timeout):
         return weather['value']
 
     async def next_activity():
-        msg = await next(t)
+        msg = await anext(t)
         if not (activity := msg.value):
             err_msg = 'Missing message value.'
             raise RuntimeError(err_msg)
