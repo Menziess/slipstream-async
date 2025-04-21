@@ -5,7 +5,12 @@ from asyncio import gather, sleep
 from collections.abc import AsyncIterable, AsyncIterator, Callable
 
 import pytest
-from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka import (
+    AIOKafkaConsumer,
+    AIOKafkaProducer,
+    ConsumerRecord,
+    TopicPartition,
+)
 from conftest import emoji
 from pytest_mock import MockerFixture
 
@@ -235,7 +240,7 @@ async def test_aiter_fail(mocker, caplog):
     t = Topic(topic, {})
 
     with pytest.raises(RuntimeError, match=''):
-        await next(t)
+        await anext(t)
 
     assert f'Error while consuming from Topic {topic}' in caplog.text
 
@@ -290,8 +295,6 @@ async def test_topic_get_consumer(raise_error, mocker):
     c = mocker.AsyncMock(spec=AIOKafkaConsumer)
     mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
 
-    assert await t.admin
-
     if raise_error:
         mocker.patch.object(
             t, 'seek', mocker.AsyncMock(side_effect=RuntimeError('oops'))
@@ -303,6 +306,106 @@ async def test_topic_get_consumer(raise_error, mocker):
     else:
         assert await t.get_consumer()
         c.start.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_topic_get_producer(mocker):
+    """Should get started instance of Kafka producer."""
+    t = Topic('test', codec=JsonCodec())
+    p = mocker.AsyncMock(spec=AIOKafkaProducer)
+    mocker.patch('slipstream.core.AIOKafkaProducer', return_value=p)
+
+    assert await t.get_producer()
+    p.start.assert_called_once()
+
+
+@pytest.mark.parametrize('dry', [True, False])
+@pytest.mark.asyncio
+async def test_topic_call(dry, mocker):
+    """Should produce message to topic."""
+    t = Topic('test', dry=dry)
+    p = mocker.AsyncMock(spec=AIOKafkaProducer)
+    mocker.patch('slipstream.core.AIOKafkaProducer', return_value=p)
+
+    await t('key', 'hello')
+
+    if dry:
+        p.send_and_wait.assert_not_called()
+    else:
+        p.send_and_wait.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_topic_aiter(mocker):
+    """Should iterate over messages from topic."""
+    t = Topic('test')
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+    c.__aiter__.return_value = [
+        ConsumerRecord('test', 0, 0, 0, 0, b'key', b'val', None, 0, 0, []),
+    ]
+
+    async for msg in t:
+        assert msg.key == 'key'
+        assert msg.value == 'val'
+        break
+
+    # Once the generator is already initialized is simply returns it
+    await t.init_generator()
+
+
+@pytest.mark.asyncio
+async def test_topic_asend(mocker):
+    """Should send data to generator."""
+    t = Topic('test')
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+    c.__aiter__.return_value = [
+        ConsumerRecord('test', 0, 0, 0, 0, b'key', b'val', None, 0, 0, []),
+    ]
+
+    msg = await t.asend(None)
+    assert msg.key == 'key'
+    assert msg.value == 'val'
+
+    with pytest.raises(StopAsyncIteration):
+        await t.asend(Signal.SENTINEL)
+
+
+@pytest.mark.asyncio
+async def test_topic_anext(mocker):
+    """Should get the next message from topic."""
+    t = Topic('test')
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+    c.__aiter__.return_value = [
+        ConsumerRecord('test', 0, 0, 0, 0, b'key', b'val', None, 0, 0, []),
+    ]
+
+    msg = await anext(t)
+    assert msg.key == 'key'
+    assert msg.value == 'val'
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(t)
+
+
+@pytest.mark.asyncio
+async def test_topic_anext_sentinel():
+    """Should get the next message from topic."""
+    t = Topic('test')
+
+    async def messages():
+        for msg in (
+            Signal.SENTINEL,
+            ConsumerRecord('test', 0, 0, 0, 0, b'key', b'val', None, 0, 0, []),
+        ):
+            yield msg
+
+    t._generator = messages()
+
+    msg = await anext(t)
+    assert msg.value == b'val'
 
 
 @pytest.mark.asyncio

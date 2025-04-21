@@ -550,16 +550,13 @@ if aiokafka_available:
             if not self.consumer:
                 self.consumer = await self.get_consumer()
             if not self._generator:
-                self._generator = self._get_generator(self.consumer)
+                return self._get_generator(self.consumer)
             return self._generator
 
         async def __aiter__(self) -> AsyncIterator[ConsumerRecord[Any, Any]]:
             """Iterate over messages from topic."""
             if not self._generator:
-                await self.init_generator()
-            if not self._generator:
-                err_msg = 'Topic generator was unset'
-                raise RuntimeError(err_msg)
+                self._generator = await self.init_generator()
             async for msg in self._generator:
                 if msg is not Signal.SENTINEL:
                     yield msg
@@ -567,23 +564,17 @@ if aiokafka_available:
         async def asend(self, value: Any) -> ConsumerRecord[Any, Any]:
             """Send data to generator."""
             if not self._generator:
-                await self.init_generator()
-            if not self._generator:
-                err_msg = 'Topic generator was unset'
-                raise RuntimeError(err_msg)
+                self._generator = await self.init_generator()
             generator = cast(
                 'AsyncGenerator[ConsumerRecord[Any, Any], Signal | None]',
                 self._generator,
             )
             return await generator.asend(value)
 
-        async def __next__(self) -> ConsumerRecord[Any, Any]:
+        async def __anext__(self) -> ConsumerRecord[Any, Any]:
             """Get the next message from topic."""
             if not self._generator:
-                await self.init_generator()
-            if not self._generator:
-                err_msg = 'Topic generator was unset'
-                raise RuntimeError(err_msg)
+                self._generator = await self.init_generator()
             while (msg := await anext(self._generator)) is Signal.SENTINEL:
                 continue
             return msg
