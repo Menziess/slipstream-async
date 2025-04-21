@@ -6,7 +6,7 @@ import pytest
 from conftest import emoji, iterable_to_async
 
 from slipstream.checkpointing import Checkpoint, Dependency
-from slipstream.core import Signal
+from slipstream.core import Conf, Signal
 
 UTC = timezone.utc
 
@@ -162,11 +162,12 @@ async def test_check_pulse_initial_state(checkpoint):
 @pytest.mark.asyncio
 async def test_check_pulse_downtime_detected(checkpoint, mocker):
     """Should detect downtime and pause dependent stream."""
+    c = Conf()
     mock_iterable = mocker.MagicMock()
-    mocker.patch(
-        'slipstream.core.Conf.iterables',
-        {str(id(checkpoint.dependent)): mock_iterable},
-    )
+    dependent_key = str(id(checkpoint.dependent))
+    c.register_iterable(dependent_key, mock_iterable)
+    pausable_stream = c.iterables[dependent_key]
+    assert pausable_stream.signal is None
 
     await checkpoint.check_pulse(
         datetime(2025, 1, 1, 10, tzinfo=UTC),
@@ -181,17 +182,18 @@ async def test_check_pulse_downtime_detected(checkpoint, mocker):
     # Downtime observed, dependent paused
     assert isinstance(downtime, timedelta)
     assert checkpoint['dependency'].is_down is True
-    mock_iterable.send_signal.assert_called_with(Signal.PAUSE)
+    assert pausable_stream.signal is Signal.PAUSE
 
 
 @pytest.mark.asyncio
 async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
     """Should detect recovery and resume dependent stream."""
+    c = Conf()
     mock_iterable = mocker.MagicMock()
-    mocker.patch(
-        'slipstream.core.Conf.iterables',
-        {str(id(checkpoint.dependent)): mock_iterable},
-    )
+    dependent_key = str(id(checkpoint.dependent))
+    c.register_iterable(dependent_key, mock_iterable)
+    pausable_stream = c.iterables[dependent_key]
+    assert pausable_stream.signal is None
 
     # If no dependency data has ever come in yet, use the first
     # pulse as a checkpoint_marker
@@ -208,6 +210,7 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
     # marked as down using the fact that the dependent stream has
     # processed one hour of data
     assert checkpoint['dependency'].is_down is True
+    assert pausable_stream.signal is Signal.PAUSE
 
     # When data does come in, and it's late (or still catching up)
     # we can observe this in the latency info
@@ -215,11 +218,6 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
         datetime(2025, 1, 1, 10, 30, tzinfo=UTC),
     )
     assert latency_info.get('is_late') is True
-
-    conf_mock = mocker.patch('slipstream.Conf', autospec=True)
-    conf_mock.return_value.iterables = {
-        str(id(checkpoint.dependent)): mocker.MagicMock(),
-    }
 
     # Latency info shows that the dependency stream has caught up
     latency_info = await checkpoint.heartbeat(
@@ -229,7 +227,7 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
 
     # Recovery observed, dependent resumed
     assert checkpoint['dependency'].is_down is False
-    mock_iterable.send_signal.assert_called_with(Signal.RESUME)
+    assert pausable_stream.signal is Signal.RESUME
 
 
 @pytest.mark.parametrize('is_async', [True, False])
