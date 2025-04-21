@@ -143,7 +143,7 @@ inline-quotes = 'single'
 docstring-quotes = 'double'
 
 [tool.pytest.ini_options]
-addopts = '--doctest-modules --cov=slipstream --cov-report=term-missing'
+addopts = '--doctest-modules'
 doctest_optionflags = 'ELLIPSIS'
 testpaths = [
   'slipstream',

@@ -55,4 +55,4 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest slipstream tests
+          pytest slipstream tests --cov=slipstream --cov-report=term-missing

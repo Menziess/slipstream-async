@@ -110,9 +110,9 @@ async def test_conf(mocker: MockerFixture):
     assert c.iterables == {}
 
     # Register iterable
-    iterable = range(1)
+    iterable = emoji()
     iterable_key = str(id(iterable))
-    iterable_item = iterable_key, emoji()
+    iterable_item = iterable_key, iterable
     c.register_iterable(*iterable_item)
 
     # Register handler
@@ -123,6 +123,10 @@ async def test_conf(mocker: MockerFixture):
 
     c.register_handler(iterable_key, handler)
 
+    # Register exit_hook
+    await_hook = mocker.AsyncMock()
+    c.register_exit_hook(await_hook)
+
     # Start distributing messages and confirm message was received
     await c.start(my_arg='test')
     assert stub.call_args_list == [
@@ -132,21 +136,37 @@ async def test_conf(mocker: MockerFixture):
         mocker.call('👌', {'my_arg': 'test'}),
     ]
 
+    await_hook.assert_called_once()
+
 
 @pytest.mark.asyncio
 async def test_conf_keyboardinterrupt(mocker: MockerFixture):
     """Should not raise on KeyboardInterrupt."""
+    c = Conf()
     awaitable = mocker.AsyncMock(side_effect=KeyboardInterrupt)
     mocker.patch('slipstream.core.gather', awaitable)
-    c = Conf()
-
-    # Register iterable
-    iterable = range(1)
-    iterable_key = str(id(iterable))
-    iterable_item = iterable_key, emoji()
-    c.register_iterable(*iterable_item)
 
     await c.start()
+
+    awaitable.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_conf_exception(mocker: MockerFixture):
+    """Should raise on Exception."""
+    c = Conf()
+    awaitable = mocker.AsyncMock(side_effect=ValueError('test'))
+    mocker.patch('slipstream.Conf._distribute_messages', awaitable)
+
+    # Register iterable
+    iterable = emoji()
+    iterable_key = str(id(iterable))
+    iterable_item = iterable_key, iterable
+    c.register_iterable(*iterable_item)
+
+    with pytest.raises(ValueError, match='test'):
+        await c.start()
+
     awaitable.assert_awaited_once()
 
 
@@ -158,7 +178,7 @@ def test_get_iterable():
 
 def test_get_callable():
     """Should return a callable."""
-    t = Topic('test', {})
+    t = Topic('test', {'security_protocol': 'SASL_SSL'})
     assert isinstance(t, Callable)
 
 
