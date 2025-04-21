@@ -21,6 +21,7 @@ from slipstream.core import (
     READ_FROM_START,
     PausableStream,
     Topic,
+    _get_processor,
     _sink_output,
     handle,
     stream,
@@ -408,13 +409,30 @@ async def test_topic_anext_sentinel():
     assert msg.value == b'val'
 
 
+@pytest.mark.parametrize(
+    ('stop_value', 'log_msg'),
+    [
+        (None, ''),
+        (TimeoutError, 'Client for topic "test" failed to shut down in time'),
+        (ValueError, 'Client for topic "test" failed to shut down gracefully'),
+    ],
+)
+@pytest.mark.asyncio
+async def test_topic_exit_hook(stop_value, log_msg, mocker, caplog):
+    """Should clean up clients."""
+    t = Topic('test')
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    c.stop.side_effect = stop_value
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+    await t.init_generator()
+    await t.exit_hook()
+    assert log_msg in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_sink_output(mocker: MockerFixture):
     """Should return the output of the sink function."""
-
-    def src():
-        pass
-
+    src = mocker.stub()
     stub = mocker.stub(name='handler')
 
     def sync_f(x):
@@ -430,6 +448,35 @@ async def test_sink_output(mocker: MockerFixture):
     await _sink_output(src, async_f, (1, 2))
     stub.assert_called_once_with((1, 2))
     stub.reset_mock()
+
+    t = mocker.AsyncMock(Topic)
+    await _sink_output(src, t, (1, 2))
+    t.assert_called_once_with(1, 2)
+    t.reset_mock()
+
+    t = mocker.AsyncMock(Topic)
+    with pytest.raises(TypeError, match='Sink expects'):
+        await _sink_output(src, t, 1)
+
+
+@pytest.mark.parametrize(
+    ('is_asyncgen', 'data', 'call_count'),
+    [
+        (False, (_ for _ in 'abcd'), 4),
+        (False, 'abcd', 1),
+        (True, emoji(), 4),
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_processor(
+    data, is_asyncgen, call_count, mocker: MockerFixture
+):
+    """Should process output depending on output type."""
+    src = mocker.stub()
+    sink = mocker.AsyncMock()
+    processor = _get_processor(src, is_asyncgen, [sink])
+    await processor(data)
+    assert sink.call_count == call_count
 
 
 @pytest.mark.asyncio
