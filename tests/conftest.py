@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from testcontainers.kafka import KafkaContainer
 
-from slipstream.caching import rocksdict_available
+from slipstream import Cache
 from slipstream.core import Conf
 from slipstream.interfaces import ICache, Key
 from slipstream.utils import PubSub, Singleton
@@ -32,18 +32,15 @@ def reset_singletons():
         conf.exit_hooks = set()  # type: ignore[attr-defined]
 
 
-if rocksdict_available:
-    from slipstream import Cache
-
-    @pytest.fixture
-    def cache() -> Generator[Cache, None]:
-        """Get Cache instance that automatically cleans itself."""
-        c = Cache('tests/db')
-        try:
-            yield c
-        finally:
-            c.close()
-            c.destroy()
+@pytest.fixture
+def cache() -> Generator[Cache, None]:
+    """Get Cache instance that automatically cleans itself."""
+    c = Cache('tests/db')
+    try:
+        yield c
+    finally:
+        c.close()
+        c.destroy()
 
 
 @pytest.fixture(scope='session')
