@@ -5,11 +5,21 @@ from asyncio import gather, sleep
 from collections.abc import AsyncIterable, AsyncIterator, Callable
 
 import pytest
+from aiokafka import AIOKafkaConsumer, TopicPartition
 from conftest import emoji
 from pytest_mock import MockerFixture
 
 from slipstream import Conf
-from slipstream.core import PausableStream, Topic, _sink_output, handle, stream
+from slipstream.codecs import JsonCodec
+from slipstream.core import (
+    READ_FROM_END,
+    READ_FROM_START,
+    PausableStream,
+    Topic,
+    _sink_output,
+    handle,
+    stream,
+)
 from slipstream.utils import Signal
 
 
@@ -107,6 +117,8 @@ async def test_conf(mocker: MockerFixture):
     """Should distribute messages in parallel."""
     c = Conf({'group.id': 'test'})
     assert c.group_id == 'test'
+    assert c.conf['group.id'] == 'test'
+    assert c.__getattr__('group.id') == 'test'
     assert c.iterables == {}
 
     # Register iterable
@@ -226,6 +238,71 @@ async def test_aiter_fail(mocker, caplog):
         await next(t)
 
     assert f'Error while consuming from Topic {topic}' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_topic_seek(mocker):
+    """Should seek to offset."""
+    t = Topic('test')
+    c = mocker.Mock(spec=AIOKafkaConsumer)
+    c.partitions_for_topic.return_value = {0, 1}
+    c.assignment.return_value = {
+        TopicPartition('test', 0),
+    }
+
+    assert await t.admin
+
+    with pytest.raises(RuntimeError, match='No consumer provided'):
+        await t.seek(-1)
+
+    with pytest.raises(ValueError, match='Offset must be bigger than -3'):
+        await t.seek(-3, consumer=c)
+
+    with pytest.raises(RuntimeError, match='Failed to assign'):
+        await t.seek(READ_FROM_START, consumer=c, timeout=0)
+
+    c.assignment.return_value = {
+        TopicPartition('test', 0),
+        TopicPartition('test', 1),
+    }
+
+    await t.seek(READ_FROM_START, consumer=c)
+    await t.seek(READ_FROM_END, consumer=c)
+
+    c.assignment.side_effect = [
+        {
+            TopicPartition('test', 0),
+        },
+        {
+            TopicPartition('test', 0),
+            TopicPartition('test', 1),
+        },
+    ]
+
+    await t.seek({0: 0, 1: 0}, consumer=c)
+
+
+@pytest.mark.parametrize('raise_error', [True, False])
+@pytest.mark.asyncio
+async def test_topic_get_consumer(raise_error, mocker):
+    """Should get started instance of Kafka consumer."""
+    t = Topic('test', codec=JsonCodec(), offset=0)
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+
+    assert await t.admin
+
+    if raise_error:
+        mocker.patch.object(
+            t, 'seek', mocker.AsyncMock(side_effect=RuntimeError('oops'))
+        )
+
+    if raise_error:
+        with pytest.raises(RuntimeError, match='oops'):
+            await t.get_consumer()
+    else:
+        assert await t.get_consumer()
+        c.start.assert_called_once()
 
 
 @pytest.mark.asyncio

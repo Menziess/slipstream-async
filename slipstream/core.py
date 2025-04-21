@@ -374,11 +374,11 @@ if aiokafka_available:
             """Seek to offset."""
             c = consumer or self.consumer
             if c is None:
-                err_msg = 'No consumer provided.'
+                err_msg = 'No consumer provided'
                 raise RuntimeError(err_msg)
 
             if isinstance(offset, int) and offset < READ_FROM_START:
-                err_msg = 'Offset must be bigger than -3.'
+                err_msg = 'Offset must be bigger than -3'
                 raise ValueError(err_msg)
 
             # Wait until all partitions are assigned
@@ -387,7 +387,7 @@ if aiokafka_available:
             max_attempts = int(timeout / 0.1)
             for i in range(max_attempts):
                 assignment = c.assignment()
-                ready_partitions = {_.partition for _ in c.assignment()}
+                ready_partitions = {_.partition for _ in assignment}
                 if partitions.issubset(ready_partitions):
                     break
                 if i % 100 == 0:
@@ -432,7 +432,7 @@ if aiokafka_available:
                 **{k: v for k, v in self.conf.items() if k in params},
             )
             await consumer.start()
-            if self.starting_offset:
+            if self.starting_offset is not None:
                 try:
                     await self.seek(self.starting_offset, consumer)
                 except Exception:
