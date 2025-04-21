@@ -96,6 +96,12 @@ async def test_pausablestream_iterator(mocker: MockerFixture):
     iterable.__anext__.assert_called()
 
 
+def test_conf_init():
+    """Should set singleton initial conf."""
+    Conf.__init__(Conf(), {'group.id': 'test'})
+    assert Conf().conf == {'group.id': 'test'}
+
+
 @pytest.mark.asyncio
 async def test_conf(mocker: MockerFixture):
     """Should distribute messages in parallel."""

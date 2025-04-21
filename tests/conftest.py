@@ -12,25 +12,24 @@ from testcontainers.kafka import KafkaContainer
 from slipstream.caching import rocksdict_available
 from slipstream.core import Conf
 from slipstream.interfaces import ICache, Key
-from slipstream.utils import PubSub
+from slipstream.utils import PubSub, Singleton
 
 
 @pytest.fixture(autouse=True)
 def reset_singletons():
     """Clean singletons each test."""
-    pubsub = PubSub()
-    conf = Conf()
+    if PubSub in Singleton._instances:
+        pubsub = PubSub()
+        for topic, listeners in dict(pubsub._topics).items():
+            for listener in listeners:
+                pubsub.unsubscribe(topic, listener)
+        pubsub._topics = {}
 
-    # Cleanup PubSub
-    for topic, listeners in dict(pubsub._topics).items():
-        for listener in listeners:
-            pubsub.unsubscribe(topic, listener)
-    pubsub._topics = {}
-
-    # Cleanup Conf
-    conf.iterables = {}
-    conf.pipes = {}
-    conf.exit_hooks = set()
+    if Conf in Singleton._instances:
+        conf = Conf()
+        conf.iterables = {}
+        conf.pipes = {}
+        conf.exit_hooks = set()
 
 
 if rocksdict_available:
