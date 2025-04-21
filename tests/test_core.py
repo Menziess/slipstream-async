@@ -374,6 +374,36 @@ async def test_topic_asend(mocker):
 
 
 @pytest.mark.asyncio
+async def test_topic_pause(mocker):
+    """Should send data to generator."""
+    t = Topic('test')
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+    mocker.patch('slipstream.core.sleep', mocker.AsyncMock())
+    c.__aiter__.return_value = [
+        ConsumerRecord('test', 0, 0, 0, 0, b'key', b'val', None, 0, 0, []),
+        ConsumerRecord('test', 0, 1, 0, 0, b'key', b'val', None, 0, 0, []),
+        ConsumerRecord('test', 0, 1, 0, 0, b'key', b'val', None, 0, 0, []),
+    ]
+
+    # Initializing generator
+    msg = await t.asend(None)
+    assert msg.key == 'key'
+    assert msg.value == 'val'
+
+    # Sending pause signal, receiving sentinel signal
+    msg = await t.asend(Signal.PAUSE)
+    assert msg is Signal.SENTINEL
+    msg = await t.asend(Signal.PAUSE)
+    assert msg is Signal.SENTINEL
+
+    # Sending resume signal, receiving data as normal
+    msg = await t.asend(Signal.RESUME)
+    assert msg.key == 'key'
+    assert msg.value == 'val'
+
+
+@pytest.mark.asyncio
 async def test_topic_anext(mocker):
     """Should get the next message from topic."""
     t = Topic('test')
