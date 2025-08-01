@@ -7,13 +7,15 @@ from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
     ClassVar,
+    ParamSpec,
     TypeAlias,
     TypeVar,
 )
 
 T = TypeVar('T')
+P = ParamSpec('P')
 
-AsyncCallable: TypeAlias = Callable[..., Awaitable[Any]] | Callable[..., Any]
+AsyncCallable: TypeAlias = Callable[P, T | Awaitable[T]]
 Pipe: TypeAlias = Callable[[AsyncIterable[Any]], AsyncIterable[Any]]
 
 

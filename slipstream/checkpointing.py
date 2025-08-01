@@ -3,13 +3,11 @@
 import logging
 from collections.abc import AsyncIterable, Callable, Generator
 from datetime import datetime, timedelta
-from typing import (
-    Any,
-)
+from typing import Any
 
 from slipstream.core import Conf, Signal
 from slipstream.interfaces import ICache
-from slipstream.utils import iscoroutinecallable
+from slipstream.utils import AsyncCallable, iscoroutinecallable
 
 _logger = logging.getLogger(__name__)
 
@@ -35,12 +33,16 @@ class Dependency:
     """
 
     @property
-    def downtime_check(self) -> Callable[['Checkpoint', 'Dependency'], Any]:
+    def downtime_check(
+        self,
+    ) -> AsyncCallable[['Checkpoint', 'Dependency'], Any]:
         """Is called when downtime is detected."""
         return self._downtime_check
 
     @property
-    def recovery_check(self) -> Callable[['Checkpoint', 'Dependency'], bool]:
+    def recovery_check(
+        self,
+    ) -> AsyncCallable[['Checkpoint', 'Dependency'], bool]:
         """Is called when downtime is resolved."""
         return self._recovery_check
 
@@ -49,9 +51,9 @@ class Dependency:
         name: str,
         dependency: AsyncIterable[Any],
         downtime_threshold: Any = timedelta(minutes=10),
-        downtime_check: Callable[['Checkpoint', 'Dependency'], Any]
+        downtime_check: AsyncCallable[['Checkpoint', 'Dependency'], Any]
         | None = None,
-        recovery_check: Callable[['Checkpoint', 'Dependency'], bool]
+        recovery_check: AsyncCallable[['Checkpoint', 'Dependency'], bool]
         | None = None,
     ) -> None:
         """Initialize dependency for checkpointing."""
