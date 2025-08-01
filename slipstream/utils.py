@@ -33,6 +33,11 @@ class Signal(Enum):
     STOP = 3
 
 
+async def awaitable(x: Any) -> Any:
+    """Convert into awaitable."""
+    return await x if isinstance(x, Awaitable) else x
+
+
 def iscoroutinecallable(o: Any) -> bool:
     """Check whether object is coroutine."""
     call = o.__call__ if callable(o) else None  # type: ignore[attr-defined]
