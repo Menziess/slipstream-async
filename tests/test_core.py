@@ -127,6 +127,12 @@ async def test_conf(mocker: MockerFixture):
     assert c.__getattr__('group.id') == 'test'
     assert c.iterables == {}
 
+    # Missing prop
+    with pytest.raises(
+        AttributeError, match='object has no attribute "missing_prop"'
+    ):
+        assert c.missing_prop
+
     # Register iterable
     iterable = emoji()
     iterable_key = str(id(iterable))

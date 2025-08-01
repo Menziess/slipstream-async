@@ -26,7 +26,7 @@ services:
           "kafka-topics",
           "--list",
           "--bootstrap-server",
-          "localhost:9091",
+          "localhost:29091",
         ]
       interval: 5s
       timeout: 10s

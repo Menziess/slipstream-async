@@ -7,13 +7,15 @@ from inspect import iscoroutinefunction, signature
 from typing import (
     Any,
     ClassVar,
+    ParamSpec,
     TypeAlias,
     TypeVar,
 )
 
 T = TypeVar('T')
+P = ParamSpec('P')
 
-AsyncCallable: TypeAlias = Callable[..., Awaitable[Any]] | Callable[..., Any]
+AsyncCallable: TypeAlias = Callable[P, T | Awaitable[T]]
 Pipe: TypeAlias = Callable[[AsyncIterable[Any]], AsyncIterable[Any]]
 
 
@@ -29,6 +31,11 @@ class Signal(Enum):
     PAUSE = 1
     RESUME = 2
     STOP = 3
+
+
+async def awaitable(x: Any) -> Any:
+    """Convert into awaitable."""
+    return await x if isinstance(x, Awaitable) else x
 
 
 def iscoroutinecallable(o: Any) -> bool:

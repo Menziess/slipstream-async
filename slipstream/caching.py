@@ -6,12 +6,7 @@ from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import TracebackType
-from typing import (
-    Any,
-    TypeVar,
-)
-
-from rocksdict import WriteBatch
+from typing import Any, TypeVar
 
 from slipstream.interfaces import ICache, Key
 
@@ -49,6 +44,7 @@ if rocksdict_available:
         RdictIter,
         ReadOptions,
         Snapshot,
+        WriteBatch,
         WriteOptions,
     )
     from rocksdict.rocksdict import (
