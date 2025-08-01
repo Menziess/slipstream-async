@@ -268,6 +268,58 @@ async def test_custom_callbacks(is_async, checkpoint, mocker):
     )
 
 
+@pytest.mark.parametrize('is_async', [True, False])
+@pytest.mark.asyncio
+async def test_custom_checks(is_async, mock_cache, mocker):
+    """Check custom check functions called."""
+    if is_async:
+        downtime_check = mocker.AsyncMock(return_value=timedelta(hours=1))
+        recovery_check = mocker.AsyncMock(return_value=timedelta(hours=1))
+    else:
+        downtime_check = mocker.Mock(return_value=timedelta(hours=1))
+        recovery_check = mocker.Mock(return_value=timedelta(hours=1))
+
+    async def messages():
+        yield {
+            'event_timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC),
+        }
+
+    dependency = Dependency(
+        'dependency',
+        messages(),
+        downtime_check=downtime_check,
+        recovery_check=recovery_check,
+    )
+
+    async def dependent():
+        yield {
+            'event_timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC),
+        }
+
+    checkpoint = Checkpoint(
+        'test', dependent(), [dependency], cache=mock_cache
+    )
+
+    # Trigger downtime
+    await checkpoint.check_pulse(
+        datetime(2025, 1, 1, 10, tzinfo=UTC),
+        state={'offset': 0},
+    )
+    assert dependency.is_down is True
+    await checkpoint.check_pulse(
+        datetime(2025, 1, 1, 11, tzinfo=UTC),
+        state={'offset': 1},
+    )
+    downtime_check.assert_called()
+
+    # Trigger recovery
+    await checkpoint.heartbeat(
+        datetime(2025, 1, 1, 11, 1, tzinfo=UTC),
+    )
+    recovery_check.assert_called()
+    assert dependency.is_down is False
+
+
 def test_repr(checkpoint):
     """Should print representation without crashing."""
     assert str(checkpoint)
