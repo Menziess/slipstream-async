@@ -371,8 +371,10 @@ class Checkpoint:
         self.state_marker = state_marker
         if not self._cache:
             return
-        self._cache[f'{self._cache_key}_state'] = self.state
-        self._cache[f'{self._cache_key}_state_marker'] = self.state_marker
+        self._cache[f'{self._cache_key}_{STATE_NAME}'] = self.state
+        self._cache[f'{self._cache_key}_{STATE_MARKER_NAME}'] = (
+            self.state_marker
+        )
 
     def _save_checkpoint(
         self,
