@@ -196,7 +196,7 @@ A checkpoint consists of one dependent, and many dependency streams:
     dependent, dependency = emoji(), emoji()
 
     # Cache for persisting one or more Checkpoints
-    checkpoints_cache = Cache('state/checkpoints', target_table_size=1024)
+    checkpoints_cache = Cache('state/checkpoints', target_table_size=10000)
 
     c = Checkpoint(
         'dependent', dependent=dependent,
