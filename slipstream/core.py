@@ -516,9 +516,6 @@ if aiokafka_available:
                     signal = yield msg
 
                     if signal is Signal.PAUSE:
-                        # Future calls to `getmany` will not return
-                        # any records from these partitions until
-                        # they have been resumed using `resume`
                         consumer.pause(*consumer.assignment())
                         _logger.debug(f'{self.name} paused')
                         while True:
@@ -527,9 +524,6 @@ if aiokafka_available:
                                 _logger.debug(f'{self.name} reactivated')
                                 consumer.resume(*consumer.assignment())
                                 break
-
-                            # Send heartbeats through `getmany`
-                            await consumer.getmany()
                             await sleep(3)
 
             except Exception as e:

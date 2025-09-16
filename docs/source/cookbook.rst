@@ -407,7 +407,7 @@ Some changes in our setup are required:
         'group_instance_id': 'activity',
         'group_id': 'activity',
     }, codec=JsonCodec(), offset=READ_FROM_END)
-    checkpoints_cache = Cache('state/checkpoints', target_table_size=1024)
+    checkpoints_cache = Cache('state/checkpoints', target_table_size=10000)
     weather_cache = Cache('state/weather')
 
 The ``Checkpoint`` defines the relationship between streams:
