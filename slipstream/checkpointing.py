@@ -14,7 +14,6 @@ _logger = logging.getLogger(__name__)
 
 STATE_NAME = 'state'
 STATE_MARKER_NAME = 'state_marker'
-CHECKPOINT_IS_DOWN = 'checkpoint_is_down'
 CHECKPOINT_STATE_NAME = 'checkpoint_state'
 CHECKPOINT_MARKER_NAME = 'checkpoint_marker'
 CHECKPOINTS_NAME = 'checkpoints'
@@ -67,13 +66,6 @@ class Dependency:
         self._recovery_check = recovery_check or self._default_recovery_check
         self.is_down = False
 
-    def save_is_down(
-        self, cache: ICache, cache_key_prefix: str, is_down: bool
-    ) -> None:
-        """Save is_down checkpoint state to cache."""
-        key = f'{cache_key_prefix}{self.name}_'
-        cache[key + CHECKPOINT_IS_DOWN] = is_down
-
     def save(
         self,
         cache: ICache,
@@ -89,7 +81,6 @@ class Dependency:
     def load(self, cache: ICache, cache_key_prefix: str) -> None:
         """Load checkpoint state from cache."""
         key = f'{cache_key_prefix}{self.name}_'
-        self.is_down = cache[key + CHECKPOINT_IS_DOWN]
         self.checkpoint_state = cache[key + CHECKPOINT_STATE_NAME]
         self.checkpoint_marker = cache[key + CHECKPOINT_MARKER_NAME]
 
@@ -268,17 +259,6 @@ class Checkpoint:
             for dependency in self.dependencies.values():
                 dependency.load(self._cache, self._cache_key)
 
-        # Pause dependent if any dependency was down
-        # Callbacks will not be called at startup of the app
-        for dependency in self.dependencies.values():
-            if not dependency.is_down:
-                continue
-            log_msg = f'Downtime of dependency "{dependency.name}" detected'
-            _logger.debug(log_msg)
-            key, c = str(id(self.dependent)), Conf()
-            if self.pause_dependent and key in c.iterables:
-                c.iterables[key].send_signal(Signal.PAUSE)
-
     async def heartbeat(
         self,
         marker: datetime | Any,
@@ -309,7 +289,7 @@ class Checkpoint:
 
         if dependency.is_down:
             if await awaitable(dependency.recovery_check(self, dependency)):
-                self._save_dependency_is_down(dependency, False)
+                dependency.is_down = False
 
             if not any(_.is_down for _ in self.dependencies.values()):
                 _logger.debug(
@@ -379,7 +359,7 @@ class Checkpoint:
                         await self._downtime_callback(self, dependency)
                     else:
                         self._downtime_callback(self, dependency)
-                self._save_dependency_is_down(dependency, True)
+                dependency.is_down = True
 
         if any(_.is_down for _ in self.dependencies.values()):
             return downtime
@@ -413,15 +393,6 @@ class Checkpoint:
             checkpoint_state,
             checkpoint_marker,
         )
-
-    def _save_dependency_is_down(
-        self, dependency: Dependency, is_down: bool
-    ) -> None:
-        """Save is_down state of the dependency checkpoint (to cache)."""
-        dependency.is_down = is_down
-        if not self._cache:
-            return
-        dependency.save_is_down(self._cache, self._cache_key, is_down)
 
     def __getitem__(self, key: str) -> Dependency:
         """Get dependency from dependencies."""
