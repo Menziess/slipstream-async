@@ -45,6 +45,16 @@ def test_dependency_init(dependency):
     assert dependency.is_down is False
 
 
+def test_dependency_save_is_down(mock_cache, dependency):
+    """Should save is_down using cache."""
+    dependency.save_is_down(mock_cache, '_prefix_', True)
+
+    loaded_dep = Dependency('emoji', iterable_to_async([]))
+    loaded_dep.load(mock_cache, '_prefix_')
+
+    assert loaded_dep.is_down is True
+
+
 def test_dependency_save_and_load(mock_cache, dependency):
     """Should save and load dependency using cache."""
     checkpoint_state = {'offset': 1}
@@ -160,7 +170,7 @@ async def test_check_pulse_initial_state(checkpoint):
 
 
 @pytest.mark.asyncio
-async def test_check_pulse_downtime_detected(checkpoint, mocker):
+async def test_check_pulse_downtime_detected(checkpoint, mocker, mock_cache):
     """Should detect downtime and pause dependent stream."""
     c = Conf()
     mock_iterable = mocker.MagicMock()
@@ -184,9 +194,14 @@ async def test_check_pulse_downtime_detected(checkpoint, mocker):
     assert checkpoint['dependency'].is_down is True
     assert pausable_stream.signal is Signal.PAUSE
 
+    # Downtime stored in cache
+    assert mock_cache['__test_dependency_checkpoint_is_down'] is True
+
 
 @pytest.mark.asyncio
-async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
+async def test_check_heartbeat_downtime_recovered(
+    checkpoint, mocker, mock_cache
+):
     """Should detect recovery and resume dependent stream."""
     c = Conf()
     mock_iterable = mocker.MagicMock()
@@ -228,6 +243,9 @@ async def test_check_heartbeat_downtime_recovered(checkpoint, mocker):
     # Recovery observed, dependent resumed
     assert checkpoint['dependency'].is_down is False
     assert pausable_stream.signal is Signal.RESUME
+
+    # Downtime stored in cache
+    assert mock_cache['__test_dependency_checkpoint_is_down'] is False
 
 
 @pytest.mark.parametrize('is_async', [True, False])
