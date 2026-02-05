@@ -15,7 +15,29 @@ from rocksdict import (
     WriteOptions,
 )
 
-from slipstream.caching import Cache
+from slipstream.caching import Cache, Proxy
+
+
+@pytest.mark.asyncio
+async def test_proxy():
+    """Should receive and send messages via pubsub."""
+    p = Proxy()
+    assert p._pubsub is not None
+    assert p._iterable_key is not None
+
+    result = None
+
+    async def send():
+        await p('test')
+
+    async def receive():
+        nonlocal result
+        async for item in p:
+            result = item
+            break
+
+    await gather(receive(), send())
+    assert result == 'test'
 
 
 @pytest.mark.serial
