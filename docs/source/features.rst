@@ -80,6 +80,41 @@ To prevent race conditions, Cache's ``transaction`` context manager can be used:
 - All actions outside of transaction blocks will ignore ongoing transactions (risk for race conditions)
 - Reads won't be limited by ongoing transactions
 
+Proxy
+^^^^^
+
+Proxy enables passing messages between handlers.
+
+::
+
+    from asyncio import run
+
+    from slipstream import handle, stream
+    from slipstream.caching import Proxy
+
+    proxy = Proxy()
+
+    async def messages():
+        for emoji in '🏆📞🐟👌':
+            yield emoji
+
+    @handle(messages(), sink=[proxy])
+    def handler(emoji):
+        yield f'Proxied {emoji}!'
+
+    @handle(proxy, sink=[print])
+    def handler(msg):
+        yield msg
+
+    run(stream())
+
+::
+
+    Proxied 🏆!
+    Proxied 📞!
+    Proxied 🐟!
+    Proxied 👌!
+
 Conf
 ^^^^
 
