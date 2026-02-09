@@ -25,8 +25,8 @@ class ICodec(metaclass=ABCMeta):
         raise NotImplementedError
 
 
-class CacheMeta(ABCMeta):
-    """Metaclass adds default functionality to ICache."""
+class SourceSinkMeta(ABCMeta):
+    """Metaclass adds default source/sink functionalities."""
 
     def __call__(cls: type[T], *args: Any, **kwargs: Any) -> T:
         """Adding instance variables."""
@@ -35,11 +35,11 @@ class CacheMeta(ABCMeta):
             instance._pubsub = PubSub()  # noqa: SLF001
         if not hasattr(instance, '_iterable_key'):
             k = str(id(instance))
-            instance._iterable_key = k + 'cache'  # noqa: SLF001
+            instance._iterable_key = k + 'source_sink'  # noqa: SLF001
         return instance
 
 
-class ICache(metaclass=CacheMeta):
+class ICache(metaclass=SourceSinkMeta):
     """Base class for cache implementations.
 
     >>> class MyCache(ICache):

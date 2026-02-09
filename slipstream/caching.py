@@ -2,13 +2,13 @@
 
 import os
 from asyncio import Lock
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import TracebackType
 from typing import Any, TypeVar
 
-from slipstream.interfaces import ICache, Key
+from slipstream.interfaces import ICache, Key, SourceSinkMeta
 
 rocksdict_available = False
 
@@ -29,6 +29,22 @@ __all__ = [
 MB = 1024 * 1024
 MINUTES = 60
 T = TypeVar('T')
+
+
+class Proxy(metaclass=SourceSinkMeta):
+    """Proxy class to publish/subscribe messages."""
+
+    __slots__ = ('_iterable_key', '_pubsub')
+
+    async def __call__(self, msg: Any) -> None:
+        """Publish to pubsub."""
+        await self._pubsub.apublish(self._iterable_key, msg)
+
+    async def __aiter__(self) -> AsyncIterator[Any]:
+        """Consume published updates."""
+        async for msg in self._pubsub.iter_topic(self._iterable_key):
+            yield msg
+
 
 if rocksdict_available:
     from rocksdict import (
