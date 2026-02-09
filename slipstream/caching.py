@@ -2,11 +2,11 @@
 
 import os
 from asyncio import Lock
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import TracebackType
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 from slipstream.interfaces import ICache, Key, SourceSinkMeta
 
@@ -70,6 +70,32 @@ if rocksdict_available:
         RdictKeys,
         RdictValues,
     )
+
+    class PrefixIterator(Generic[T]):
+        """Iterator wrapper that stops when key no longer matches prefix."""
+
+        def __init__(
+            self,
+            iterator: Iterator[T],
+            prefix: Key,
+            key_extractor: Callable[[T], Key],
+        ) -> None:
+            """Initialize with iterator, prefix, and key extraction func."""
+            self._iterator = iterator
+            self._prefix = str(prefix)
+            self._key_extractor = key_extractor
+
+        def __iter__(self) -> 'PrefixIterator[T]':
+            """Return self as iterator."""
+            return self
+
+        def __next__(self) -> T:
+            """Return next item or stop if key doesn't match prefix."""
+            item = next(self._iterator)
+            key = self._key_extractor(item)
+            if not str(key).startswith(self._prefix):
+                raise StopIteration
+            return item
 
     class Cache(ICache):
         """Create a RocksDB database in the specified folder.
@@ -277,47 +303,108 @@ if rocksdict_available:
         def items(
             self,
             backwards: bool = False,
-            from_key: str | int | float | bytes | bool | None = None,
+            from_key: Key | None = None,
             read_opt: ReadOptions | None = None,
-        ) -> RdictItems:
+            prefix: Key | None = None,
+        ) -> RdictItems | PrefixIterator[tuple[Key, Any]]:
             """Get tuples of key-value pairs."""
-            return self.db.items(backwards, from_key, read_opt)
+            effective_from_key = from_key if from_key is not None else prefix
+            result = self.db.items(backwards, effective_from_key, read_opt)
+            if prefix is not None:
+                return PrefixIterator(iter(result), prefix, lambda x: x[0])
+            return result
 
         def keys(
             self,
             backwards: bool = False,
-            from_key: str | int | float | bytes | bool | None = None,
+            from_key: Key | None = None,
             read_opt: ReadOptions | None = None,
-        ) -> RdictKeys:
+            prefix: Key | None = None,
+        ) -> RdictKeys | PrefixIterator[Key]:
             """Get keys."""
-            return self.db.keys(backwards, from_key, read_opt)
+            effective_from_key = from_key if from_key is not None else prefix
+            result = self.db.keys(backwards, effective_from_key, read_opt)
+            if prefix is not None:
+                return PrefixIterator(iter(result), prefix, lambda x: x)
+            return result
 
         def values(
             self,
             backwards: bool = False,
             from_key: Key | None = None,
             read_opt: ReadOptions | None = None,
-        ) -> RdictValues:
+            prefix: Key | None = None,
+        ) -> RdictValues | Iterator[Any]:
             """Get values."""
+            if prefix is not None:
+                effective_from_key = (
+                    from_key if from_key is not None else prefix
+                )
+                return self._prefix_values(
+                    backwards, effective_from_key, read_opt, prefix
+                )
             return self.db.values(backwards, from_key, read_opt)
+
+        def _prefix_values(
+            self,
+            backwards: bool,
+            from_key: Key | None,
+            read_opt: ReadOptions | None,
+            prefix: Key,
+        ) -> Iterator[Any]:
+            """Iterate values while keys match prefix."""
+            prefix_str = str(prefix)
+            for key, value in self.db.items(backwards, from_key, read_opt):
+                if not str(key).startswith(prefix_str):
+                    break
+                yield value
 
         def columns(
             self,
             backwards: bool = False,
             from_key: Key | None = None,
             read_opt: ReadOptions | None = None,
-        ) -> RdictColumns:
+            prefix: Key | None = None,
+        ) -> RdictColumns | Iterator[list[tuple[Any, Any]]]:
             """Get values as widecolumns."""
+            if prefix is not None:
+                effective_from_key = (
+                    from_key if from_key is not None else prefix
+                )
+                return self._prefix_columns(
+                    backwards, effective_from_key, read_opt, prefix
+                )
             return self.db.columns(backwards, from_key, read_opt)
+
+        def _prefix_columns(
+            self,
+            backwards: bool,
+            from_key: Key | None,
+            read_opt: ReadOptions | None,
+            prefix: Key,
+        ) -> Iterator[list[tuple[Any, Any]]]:
+            """Iterate columns while keys match prefix."""
+            prefix_str = str(prefix)
+            for key, columns in self.db.entities(
+                backwards, from_key, read_opt
+            ):
+                if not str(key).startswith(prefix_str):
+                    break
+                yield columns
 
         def entities(
             self,
             backwards: bool = False,
             from_key: Key | None = None,
             read_opt: ReadOptions | None = None,
-        ) -> RdictEntities:
+            prefix: Key | None = None,
+        ) -> RdictEntities | PrefixIterator[tuple[Key, list[tuple[Any, Any]]]]:
             """Get keys and entities."""
-            return self.db.entities(backwards, from_key, read_opt)
+            effective_from_key = from_key if from_key is not None else prefix
+            result = self.db.entities(backwards, effective_from_key, read_opt)
+            if prefix is not None:
+                return PrefixIterator(iter(result), prefix, lambda x: x[0])
+            return result
 
         def ingest_external_file(
             self,
