@@ -63,6 +63,7 @@ if rocksdict_available:
         WriteBatch,
         WriteOptions,
     )
+
     class Cache(ICache):
         """Create a RocksDB database in the specified folder.
 
@@ -293,9 +294,7 @@ if rocksdict_available:
             """Get keys."""
             effective_from_key = from_key if from_key is not None else prefix
             prefix_str = str(prefix)
-            for key in self.db.keys(
-                backwards, effective_from_key, read_opt
-            ):
+            for key in self.db.keys(backwards, effective_from_key, read_opt):
                 if prefix is not None and not str(key).startswith(prefix_str):
                     break
                 yield key
