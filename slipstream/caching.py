@@ -311,7 +311,7 @@ if rocksdict_available:
             effective_from_key = from_key if from_key is not None else prefix
             result = self.db.items(backwards, effective_from_key, read_opt)
             if prefix is not None:
-                return PrefixIterator(iter(result), prefix, lambda x: x[0])
+                return PrefixIterator(result, prefix, lambda x: x[0])
             return result
 
         def keys(
@@ -325,7 +325,7 @@ if rocksdict_available:
             effective_from_key = from_key if from_key is not None else prefix
             result = self.db.keys(backwards, effective_from_key, read_opt)
             if prefix is not None:
-                return PrefixIterator(iter(result), prefix, lambda x: x)
+                return PrefixIterator(result, prefix, lambda x: x)
             return result
 
         def values(
@@ -403,7 +403,7 @@ if rocksdict_available:
             effective_from_key = from_key if from_key is not None else prefix
             result = self.db.entities(backwards, effective_from_key, read_opt)
             if prefix is not None:
-                return PrefixIterator(iter(result), prefix, lambda x: x[0])
+                return PrefixIterator(result, prefix, lambda x: x[0])
             return result
 
         def ingest_external_file(
