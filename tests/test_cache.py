@@ -222,3 +222,104 @@ def test_wrapper_methods(cache):
     assert cache.property_int_value('rocksdb.background-errors') == 0
     cache.set_options({'table_factory.filter_policy.bloom_before_level': '3'})
     assert cache.latest_sequence_number()
+
+
+def test_keys_prefix(cache):
+    """Should stop iteration when key no longer matches prefix."""
+    cache['user:1'] = 'alice'
+    cache['user:2'] = 'bob'
+    cache['user:3'] = 'charlie'
+    cache['order:1'] = 'order1'
+    cache['order:2'] = 'order2'
+
+    assert list(cache.keys(prefix='user:')) == ['user:1', 'user:2', 'user:3']
+
+    assert list(cache.keys(prefix='order:')) == ['order:1', 'order:2']
+
+    assert len(list(cache.keys())) == 5
+
+
+def test_items_prefix(cache):
+    """Should stop iteration when key no longer matches prefix."""
+    cache['user:1'] = 'alice'
+    cache['user:2'] = 'bob'
+    cache['order:1'] = 'order1'
+
+    assert list(cache.items(prefix='user:')) == [
+        ('user:1', 'alice'),
+        ('user:2', 'bob'),
+    ]
+
+    assert list(cache.items(prefix='order:')) == [('order:1', 'order1')]
+
+
+def test_values_prefix(cache):
+    """Should stop iteration when key no longer matches prefix."""
+    cache['user:1'] = 'alice'
+    cache['user:2'] = 'bob'
+    cache['order:1'] = 'order1'
+
+    assert list(cache.values(prefix='user:')) == ['alice', 'bob']
+
+    assert list(cache.values(prefix='order:')) == ['order1']
+
+
+def test_entities_prefix(cache):
+    """Should stop iteration when key no longer matches prefix."""
+    cache.put_entity('user:1', ['name', 'age'], ['alice', 30])
+    cache.put_entity('user:2', ['name', 'age'], ['bob', 25])
+    cache.put_entity('order:1', ['item', 'qty'], ['book', 2])
+
+    result = list(cache.entities(prefix='user:'))
+    assert len(result) == 2
+    assert result[0][0] == 'user:1'
+    assert result[1][0] == 'user:2'
+
+    result = list(cache.entities(prefix='order:'))
+    assert len(result) == 1
+    assert result[0][0] == 'order:1'
+
+
+def test_columns_prefix(cache):
+    """Should stop iteration when key no longer matches prefix."""
+    cache.put_entity('user:1', ['name', 'age'], ['alice', 30])
+    cache.put_entity('user:2', ['name', 'age'], ['bob', 25])
+    cache.put_entity('order:1', ['item', 'qty'], ['book', 2])
+
+    result = list(cache.columns(prefix='user:'))
+    assert len(result) == 2
+
+    result = list(cache.columns(prefix='order:'))
+    assert len(result) == 1
+
+
+def test_prefix_with_from_key(cache):
+    """Should respect from_key when prefix is also provided."""
+    cache['user:1'] = 'alice'
+    cache['user:2'] = 'bob'
+    cache['user:3'] = 'charlie'
+    cache['order:1'] = 'order1'
+
+    result = list(cache.keys(from_key='user:2', prefix='user:'))
+    assert result == ['user:2', 'user:3']
+
+
+def test_prefix_no_matches(cache):
+    """Should return empty when no keys match prefix."""
+    cache['user:1'] = 'alice'
+    cache['user:2'] = 'bob'
+
+    assert list(cache.keys(prefix='order:')) == []
+    assert list(cache.items(prefix='order:')) == []
+    assert list(cache.values(prefix='order:')) == []
+
+
+def test_existing_iteration_unchanged(cache):
+    """Should maintain existing behavior when prefix is not provided."""
+    cache[123] = 'numeric'
+    cache['abc'] = 'string'
+
+    assert 123 in list(cache.keys())
+    assert 'abc' in list(cache.keys())
+    assert (123, 'numeric') in list(cache.items())
+    assert 'numeric' in list(cache.values())
