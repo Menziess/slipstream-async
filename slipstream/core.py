@@ -440,7 +440,7 @@ if aiokafka_available:
             else:
                 err_msg = (
                     f'Failed to assign {partitions} after {timeout}s, '
-                    f'got: {ready_partitions}',
+                    f'got: {ready_partitions}'
                 )
                 raise RuntimeError(err_msg)
 
