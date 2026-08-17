@@ -11,6 +11,7 @@ from aiokafka import (
     ConsumerRecord,
     TopicPartition,
 )
+from aiokafka.errors import RequestTimedOutError
 from conftest import emoji
 from pytest_mock import MockerFixture
 
@@ -231,6 +232,72 @@ async def test_call_fail(mocker: MockerFixture, caplog):
     )
 
     assert f'Error while producing to Topic {topic}' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_call_retries_retriable_error_and_pauses_sources(
+    mocker: MockerFixture,
+):
+    """Should retry retriable produce errors and pause registered sources."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=[RequestTimedOutError(), None],
+    )
+
+    async def source() -> AsyncIterator[str]:
+        yield 'x'
+
+    conf = Conf()
+    conf.register_iterable('src', source())
+    topic = Topic(
+        'out',
+        {'produce_retries': 2, 'produce_retry_backoff': 0},
+    )
+
+    await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 2
+    assert conf.iterables['src'].signal is Signal.RESUME
+
+
+@pytest.mark.asyncio
+async def test_call_does_not_retry_non_retriable_error(mocker: MockerFixture):
+    """Non-retriable errors still fail on the first attempt."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=RuntimeError('bad payload'),
+    )
+    topic = Topic('out', {'produce_retries': 5, 'produce_retry_backoff': 0})
+
+    with pytest.raises(RuntimeError, match='bad payload'):
+        await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_call_fail_fast_by_default_on_timeout(mocker: MockerFixture):
+    """Zero produce_retries (default) does not retry broker timeouts."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=RequestTimedOutError(),
+    )
+    topic = Topic('out', {})
+
+    with pytest.raises(RuntimeError, match='Error while producing'):
+        await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 1
+    assert topic.produce_retries == 0
 
 
 @pytest.mark.asyncio

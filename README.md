@@ -74,6 +74,6 @@ Copy-paste [this snippet](https://slipstream.readthedocs.io/en/stable/getting_st
 - [`slipstream.stream`](https://slipstream.readthedocs.io/en/stable/slipstream.html#slipstream.stream): start streaming
 - [`slipstream.Topic`](https://slipstream.readthedocs.io/en/stable/slipstream.html#slipstream.core.Topic): consume from (iterable), and produce to (callable) kafka using [**aiokafka**](https://aiokafka.readthedocs.io/en/stable/index.html)
 - [`slipstream.Cache`](https://slipstream.readthedocs.io/en/stable/slipstream.html#slipstream.Cache): store data to disk using [**rocksdict**](https://rocksdict.github.io/RocksDict/rocksdict.html)
-- [`slipstream.Conf`](https://slipstream.readthedocs.io/en/stable/slipstream.html#slipstream.Conf): set global kafka configuration (can be overridden per topic)
+- [`slipstream.Conf`](https://slipstream.readthedocs.io/en/stable/slipstream.html#slipstream.Conf): set global kafka configuration (can be overridden per topic). Produce is fail-fast by default; set `produce_retries` / `produce_retry_backoff` to retry retriable broker errors (sources pause via `Conf.signal_iterables` while retrying)
 - [`slipstream.codecs.JsonCodec`](https://slipstream.readthedocs.io/en/stable/autoapi/slipstream/codecs/index.html#slipstream.codecs.JsonCodec): serialize and deserialize json messages
 - [`slipstream.checkpointing.Checkpoint`](https://slipstream.readthedocs.io/en/stable/autoapi/slipstream/checkpointing/index.html#slipstream.checkpointing.Checkpoint): recover from stream downtimes

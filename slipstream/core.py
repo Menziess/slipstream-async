@@ -190,6 +190,11 @@ class Conf(metaclass=Singleton):
         """Add exit hook that's called on shutdown."""
         self.exit_hooks.add(exit_hook)
 
+    def signal_iterables(self, signal: Signal) -> None:
+        """Send ``signal`` to every registered source stream."""
+        for stream in self.iterables.values():
+            stream.send_signal(signal)
+
     async def start(self, **kwargs: Any) -> None:
         """Start processing registered iterables."""
         try:
@@ -287,7 +292,31 @@ if aiokafka_available:
         ConsumerRecord,
         TopicPartition,
     )
+    from aiokafka.errors import (
+        KafkaConnectionError,
+        KafkaTimeoutError,
+        LeaderNotAvailableError,
+        NodeNotReadyError,
+        NotLeaderForPartitionError,
+        RequestTimedOutError,
+    )
     from aiokafka.helpers import create_ssl_context
+
+    _RETRIABLE_PRODUCE_ERRORS = (
+        RequestTimedOutError,
+        NodeNotReadyError,
+        KafkaConnectionError,
+        KafkaTimeoutError,
+        NotLeaderForPartitionError,
+        LeaderNotAvailableError,
+        TimeoutError,
+        ConnectionError,
+        OSError,
+    )
+
+    def is_retriable_produce_error(exc: BaseException) -> bool:
+        """Return whether a produce failure is safe to retry."""
+        return isinstance(exc, _RETRIABLE_PRODUCE_ERRORS)
 
     class Topic:
         """Act as a consumer and producer.
@@ -309,6 +338,12 @@ if aiokafka_available:
         Call topic (callable) with data to produce to it:
 
         >>> await topic({'msg': 'Hello World!'})  # doctest: +SKIP
+
+        Produce retries default to fail-fast (``produce_retries=0``).
+        Set ``produce_retries`` (and optional ``produce_retry_backoff``
+        seconds) on ``Conf`` or the topic ``conf`` to retry retriable
+        broker errors. Sources are paused via ``Conf.signal_iterables``
+        while retrying.
         """
 
         def __init__(
@@ -323,7 +358,12 @@ if aiokafka_available:
             c = Conf()
             c.register_exit_hook(self.exit_hook)
             self.name = name
-            self.conf = {**c.conf, **(conf or {})}
+            merged = {**c.conf, **(conf or {})}
+            self.produce_retries = int(merged.pop('produce_retries', 0))
+            self.produce_retry_backoff = float(
+                merged.pop('produce_retry_backoff', 1.0)
+            )
+            self.conf = merged
             self.starting_offset = offset
             self.codec = codec
             self.dry = dry
@@ -476,21 +516,62 @@ if aiokafka_available:
                 return
             if not self.producer:
                 self.producer = await self.get_producer()
+            await self._send_with_retry(key, value, headers_list, **kwargs)
+
+        async def _send_with_retry(
+            self,
+            key: Any,
+            value: Any,
+            headers_list: list[tuple[str, bytes]] | None,
+            **kwargs: Any,
+        ) -> None:
+            """Send once by default; retry only if ``produce_retries`` > 0."""
+            producer = self.producer
+            if producer is None:
+                err_msg = 'Producer not started'
+                raise RuntimeError(err_msg)
+
+            paused = False
+            attempts = self.produce_retries + 1
             try:
-                await self.producer.send_and_wait(
-                    self.name,
-                    key=key,
-                    value=value,
-                    headers=headers_list,
-                    **kwargs,
-                )
-            except Exception as e:
-                err_msg = (
-                    f'Error while producing to Topic {self.name}: '
-                    f'{e.args[0] if e.args else ""}'
-                )
-                _logger.exception(err_msg)
-                raise RuntimeError(err_msg) from e
+                for attempt in range(attempts):
+                    try:
+                        await producer.send_and_wait(
+                            self.name,
+                            key=key,
+                            value=value,
+                            headers=headers_list,
+                            **kwargs,
+                        )
+                    except Exception as e:  # noqa: PERF203
+                        retriable = (
+                            attempt + 1 < attempts
+                            and is_retriable_produce_error(e)
+                        )
+                        if not retriable:
+                            err_msg = (
+                                f'Error while producing to Topic {self.name}: '
+                                f'{e.args[0] if e.args else ""}'
+                            )
+                            _logger.exception(err_msg)
+                            raise RuntimeError(err_msg) from e
+                        if not paused:
+                            Conf().signal_iterables(Signal.PAUSE)
+                            paused = True
+                        _logger.warning(
+                            'Retrying produce to Topic %s (%s/%s) after %s',
+                            self.name,
+                            attempt + 1,
+                            self.produce_retries,
+                            e,
+                        )
+                        if self.produce_retry_backoff > 0:
+                            await sleep(self.produce_retry_backoff)
+                    else:
+                        return
+            finally:
+                if paused:
+                    Conf().signal_iterables(Signal.RESUME)
 
         async def _get_generator(
             self,
