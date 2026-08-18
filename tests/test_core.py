@@ -11,12 +11,18 @@ from aiokafka import (
     ConsumerRecord,
     TopicPartition,
 )
+from aiokafka.errors import (
+    KafkaTimeoutError,
+    NotEnoughReplicasError,
+    RequestTimedOutError,
+)
 from conftest import emoji
 from pytest_mock import MockerFixture
 
 from slipstream import Conf
 from slipstream.codecs import JsonCodec
 from slipstream.core import (
+    PRODUCE_PAUSE_REASON,
     READ_FROM_END,
     READ_FROM_START,
     PausableStream,
@@ -24,6 +30,7 @@ from slipstream.core import (
     _get_processor,
     _sink_output,
     handle,
+    is_retriable_produce_error,
     stream,
 )
 from slipstream.utils import Signal
@@ -110,6 +117,65 @@ async def test_pausablestream_iterator(mocker: MockerFixture):
     # But if will not receive signals
     assert await anext(stream) == '🏆'
     iterable.__anext__.assert_called()
+
+
+def test_pausablestream_pause_reasons_compose():
+    """Produce resume must not lift a checkpoint pause."""
+    stream = PausableStream(emoji())
+    stream.send_signal(Signal.PAUSE)
+    stream.send_signal(
+        Signal.PAUSE,
+        PRODUCE_PAUSE_REASON,
+        counted=True,
+    )
+    stream.send_signal(
+        Signal.RESUME,
+        PRODUCE_PAUSE_REASON,
+        counted=True,
+    )
+    assert stream.signal is Signal.PAUSE
+    assert not stream.running.is_set()
+    stream.send_signal(Signal.RESUME)
+    assert stream.signal is Signal.RESUME
+    assert stream.running.is_set()
+
+
+def test_pausablestream_counted_pause_is_refcounted():
+    """Overlapping counted pauses stay paused until the last resume."""
+    stream = PausableStream(emoji())
+    stream.send_signal(
+        Signal.PAUSE,
+        PRODUCE_PAUSE_REASON,
+        counted=True,
+    )
+    stream.send_signal(
+        Signal.PAUSE,
+        PRODUCE_PAUSE_REASON,
+        counted=True,
+    )
+    stream.send_signal(
+        Signal.RESUME,
+        PRODUCE_PAUSE_REASON,
+        counted=True,
+    )
+    assert stream.signal is Signal.PAUSE
+    assert not stream.running.is_set()
+    stream.send_signal(
+        Signal.RESUME,
+        PRODUCE_PAUSE_REASON,
+        counted=True,
+    )
+    assert stream.signal is Signal.RESUME
+    assert stream.running.is_set()
+
+
+def test_is_retriable_produce_error():
+    """Use aiokafka retriable flags, plus KafkaTimeoutError."""
+    assert is_retriable_produce_error(RequestTimedOutError())
+    assert is_retriable_produce_error(NotEnoughReplicasError())
+    assert is_retriable_produce_error(KafkaTimeoutError())
+    assert not is_retriable_produce_error(OSError())
+    assert not is_retriable_produce_error(RuntimeError('bad'))
 
 
 def test_conf_init():
@@ -231,6 +297,143 @@ async def test_call_fail(mocker: MockerFixture, caplog):
     )
 
     assert f'Error while producing to Topic {topic}' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_call_retries_retriable_error_and_pauses_sources(
+    mocker: MockerFixture,
+):
+    """Should retry retriable produce errors and pause registered sources."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=[RequestTimedOutError(), None],
+    )
+
+    async def source() -> AsyncIterator[str]:
+        yield 'x'
+
+    conf = Conf()
+    conf.register_iterable('src', source())
+    spy = mocker.spy(conf.iterables['src'], 'send_signal')
+    topic = Topic(
+        'out',
+        {'produce_retries': 2, 'produce_retry_backoff': 0},
+    )
+
+    await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 2
+    assert spy.call_args_list == [
+        mocker.call(Signal.PAUSE, PRODUCE_PAUSE_REASON, counted=True),
+        mocker.call(Signal.RESUME, PRODUCE_PAUSE_REASON, counted=True),
+    ]
+    assert conf.iterables['src'].signal is Signal.RESUME
+
+
+@pytest.mark.asyncio
+async def test_call_does_not_retry_non_retriable_error(mocker: MockerFixture):
+    """Non-retriable errors still fail on the first attempt."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=RuntimeError('bad payload'),
+    )
+    topic = Topic('out', {'produce_retries': 5, 'produce_retry_backoff': 0})
+
+    with pytest.raises(RuntimeError, match='bad payload'):
+        await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_call_fail_fast_by_default_on_timeout(mocker: MockerFixture):
+    """Zero produce_retries (default) does not retry broker timeouts."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=RequestTimedOutError(),
+    )
+    topic = Topic('out', {})
+
+    with pytest.raises(RuntimeError, match='Error while producing'):
+        await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 1
+    assert topic.produce_retries == 0
+
+
+@pytest.mark.asyncio
+async def test_call_exhausted_retries_still_resumes_sources(
+    mocker: MockerFixture,
+):
+    """Sources resume in finally when retries are exhausted."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=[RequestTimedOutError(), RequestTimedOutError()],
+    )
+
+    async def source() -> AsyncIterator[str]:
+        yield 'x'
+
+    conf = Conf()
+    conf.register_iterable('src', source())
+    spy = mocker.spy(conf.iterables['src'], 'send_signal')
+    topic = Topic(
+        'out',
+        {'produce_retries': 1, 'produce_retry_backoff': 0},
+    )
+
+    with pytest.raises(RuntimeError, match='Error while producing'):
+        await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 2
+    assert spy.call_args_list == [
+        mocker.call(Signal.PAUSE, PRODUCE_PAUSE_REASON, counted=True),
+        mocker.call(Signal.RESUME, PRODUCE_PAUSE_REASON, counted=True),
+    ]
+    assert conf.iterables['src'].signal is Signal.RESUME
+
+
+@pytest.mark.asyncio
+async def test_call_retry_does_not_resume_checkpoint_paused_source(
+    mocker: MockerFixture,
+):
+    """Produce retry must not lift a checkpoint pause."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+    mock_producer.send_and_wait = mocker.AsyncMock(
+        side_effect=[RequestTimedOutError(), None],
+    )
+
+    async def source() -> AsyncIterator[str]:
+        yield 'x'
+
+    conf = Conf()
+    conf.register_iterable('src', source())
+    stream = conf.iterables['src']
+    stream.send_signal(Signal.PAUSE)
+    topic = Topic(
+        'out',
+        {'produce_retries': 2, 'produce_retry_backoff': 0},
+    )
+
+    await topic('k', 'v')
+
+    assert stream.signal is Signal.PAUSE
+    assert not stream.running.is_set()
 
 
 @pytest.mark.asyncio

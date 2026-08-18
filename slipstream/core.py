@@ -52,6 +52,7 @@ __all__ = [
 
 READ_FROM_START = -2
 READ_FROM_END = -1
+PRODUCE_PAUSE_REASON = 'produce'
 
 
 _logger = logging.getLogger(__name__)
@@ -67,9 +68,12 @@ class PausableStream:
 
     For example, the Topic class uses the signal to pause the Consumer.
 
-    Any value can be sent as a Signal, but only Signal.PAUSE will trigger
-    a pause in consumption of the iterable in PausableStream. Any other
-    value will resume the PausableStream.
+    Only ``Signal.PAUSE`` pauses consumption; ``Signal.RESUME``
+    resumes it when no other pause reasons remain.
+
+    Pause and resume are tracked per ``reason`` so independent callers
+    compose (checkpoint downtime vs produce retry). Use ``counted=True``
+    when overlapping pauses share a reason, such as concurrent produces.
     """
 
     @property
@@ -81,17 +85,52 @@ class PausableStream:
         """Create instance that holds iterable and queue to pause it."""
         self._iterable: AsyncIterable[Any] = it
         self._iterator: AsyncIterator[Any] | None = None
+        self._pause_counts: dict[str, int] = {}
         self.signal: Signal | Any = None
         self.running: Event = Event()
         self.running.set()
 
-    def send_signal(self, signal: Signal | Any) -> None:
-        """Send signal to stream."""
+    def send_signal(
+        self,
+        signal: Signal | Any,
+        reason: str = '',
+        *,
+        counted: bool = False,
+    ) -> None:
+        """Send signal to stream.
+
+        ``PAUSE``/``RESUME`` compose by ``reason``. A counted reason
+        increments on pause and decrements on resume; an uncounted
+        reason latches until resumed. Resume is applied only when no
+        reasons remain.
+        """
+        if signal is Signal.PAUSE:
+            if counted:
+                self._pause_counts[reason] = (
+                    self._pause_counts.get(reason, 0) + 1
+                )
+            else:
+                self._pause_counts[reason] = 1
+            self.signal = Signal.PAUSE
+            if self.running.is_set():
+                self.running.clear()
+            return
+        if signal is Signal.RESUME:
+            if counted:
+                remaining = self._pause_counts.get(reason, 0) - 1
+                if remaining > 0:
+                    self._pause_counts[reason] = remaining
+                else:
+                    self._pause_counts.pop(reason, None)
+            else:
+                self._pause_counts.pop(reason, None)
+            if self._pause_counts:
+                return
+            self.signal = Signal.RESUME
+            if not self.running.is_set():
+                self.running.set()
+            return
         self.signal = signal
-        if signal is Signal.PAUSE and self.running.is_set():
-            self.running.clear()
-        elif signal is Signal.RESUME and not self.running.is_set():
-            self.running.set()
 
     def __aiter__(self) -> AsyncIterator[Any]:
         """Create iterator."""
@@ -190,6 +229,17 @@ class Conf(metaclass=Singleton):
         """Add exit hook that's called on shutdown."""
         self.exit_hooks.add(exit_hook)
 
+    def signal_iterables(
+        self,
+        signal: Signal,
+        reason: str = '',
+        *,
+        counted: bool = False,
+    ) -> None:
+        """Send ``signal`` to every registered source stream."""
+        for stream in self.iterables.values():
+            stream.send_signal(signal, reason, counted=counted)
+
     async def start(self, **kwargs: Any) -> None:
         """Start processing registered iterables."""
         try:
@@ -287,7 +337,20 @@ if aiokafka_available:
         ConsumerRecord,
         TopicPartition,
     )
+    from aiokafka.errors import KafkaTimeoutError
     from aiokafka.helpers import create_ssl_context
+
+    def is_retriable_produce_error(exc: BaseException) -> bool:
+        """Return whether a produce failure is safe to retry.
+
+        Trust aiokafka's ``retriable`` flag so the set cannot drift.
+        ``KafkaTimeoutError`` is not flagged retriable but is raised
+        when ``send_and_wait`` cannot enqueue before
+        ``request_timeout_ms``.
+        """
+        return bool(getattr(exc, 'retriable', False)) or isinstance(
+            exc, KafkaTimeoutError
+        )
 
     class Topic:
         """Act as a consumer and producer.
@@ -309,6 +372,12 @@ if aiokafka_available:
         Call topic (callable) with data to produce to it:
 
         >>> await topic({'msg': 'Hello World!'})  # doctest: +SKIP
+
+        Produce retries default to fail-fast (``produce_retries=0``).
+        Set ``produce_retries`` (and optional ``produce_retry_backoff``
+        seconds) on ``Conf`` or the topic ``conf`` to retry retriable
+        broker errors. Sources are paused via ``Conf.signal_iterables``
+        while retrying.
         """
 
         def __init__(
@@ -323,7 +392,12 @@ if aiokafka_available:
             c = Conf()
             c.register_exit_hook(self.exit_hook)
             self.name = name
-            self.conf = {**c.conf, **(conf or {})}
+            merged = {**c.conf, **(conf or {})}
+            self.produce_retries = int(merged.pop('produce_retries', 0))
+            self.produce_retry_backoff = float(
+                merged.pop('produce_retry_backoff', 1.0)
+            )
+            self.conf = merged
             self.starting_offset = offset
             self.codec = codec
             self.dry = dry
@@ -400,7 +474,7 @@ if aiokafka_available:
             else:
                 err_msg = (
                     f'Failed to assign {partitions} after {timeout}s, '
-                    f'got: {ready_partitions}',
+                    f'got: {ready_partitions}'
                 )
                 raise RuntimeError(err_msg)
 
@@ -476,21 +550,70 @@ if aiokafka_available:
                 return
             if not self.producer:
                 self.producer = await self.get_producer()
+            await self._send_with_retry(key, value, headers_list, **kwargs)
+
+        async def _send_with_retry(
+            self,
+            key: Any,
+            value: Any,
+            headers_list: list[tuple[str, bytes]] | None,
+            **kwargs: Any,
+        ) -> None:
+            """Send once by default; retry only if ``produce_retries`` > 0."""
+            producer = self.producer
+            if producer is None:
+                err_msg = 'Producer not started'
+                raise RuntimeError(err_msg)
+
+            paused = False
+            attempts = self.produce_retries + 1
             try:
-                await self.producer.send_and_wait(
-                    self.name,
-                    key=key,
-                    value=value,
-                    headers=headers_list,
-                    **kwargs,
-                )
-            except Exception as e:
-                err_msg = (
-                    f'Error while producing to Topic {self.name}: '
-                    f'{e.args[0] if e.args else ""}'
-                )
-                _logger.exception(err_msg)
-                raise RuntimeError(err_msg) from e
+                for attempt in range(attempts):
+                    try:
+                        await producer.send_and_wait(
+                            self.name,
+                            key=key,
+                            value=value,
+                            headers=headers_list,
+                            **kwargs,
+                        )
+                    except Exception as e:  # noqa: PERF203
+                        retriable = (
+                            attempt + 1 < attempts
+                            and is_retriable_produce_error(e)
+                        )
+                        if not retriable:
+                            err_msg = (
+                                f'Error while producing to Topic {self.name}: '
+                                f'{e.args[0] if e.args else ""}'
+                            )
+                            _logger.exception(err_msg)
+                            raise RuntimeError(err_msg) from e
+                        if not paused:
+                            Conf().signal_iterables(
+                                Signal.PAUSE,
+                                PRODUCE_PAUSE_REASON,
+                                counted=True,
+                            )
+                            paused = True
+                        _logger.warning(
+                            'Retrying produce to Topic %s (%s/%s) after %s',
+                            self.name,
+                            attempt + 1,
+                            self.produce_retries,
+                            e,
+                        )
+                        if self.produce_retry_backoff > 0:
+                            await sleep(self.produce_retry_backoff)
+                    else:
+                        return
+            finally:
+                if paused:
+                    Conf().signal_iterables(
+                        Signal.RESUME,
+                        PRODUCE_PAUSE_REASON,
+                        counted=True,
+                    )
 
         async def _get_generator(
             self,
