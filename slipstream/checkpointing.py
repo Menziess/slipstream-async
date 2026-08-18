@@ -9,6 +9,17 @@ from slipstream.core import Conf, Signal
 from slipstream.interfaces import ICache
 from slipstream.utils import AsyncCallable, awaitable, iscoroutinecallable
 
+try:
+    from aiokafka.errors import KafkaError
+
+    _PROBE_ERRORS: tuple[type[BaseException], ...] = (
+        KafkaError,
+        AttributeError,
+        TypeError,
+    )
+except ImportError:  # pragma: no cover
+    _PROBE_ERRORS = (AttributeError, TypeError)
+
 _logger = logging.getLogger(__name__)
 
 
@@ -17,6 +28,60 @@ STATE_MARKER_NAME = 'state_marker'
 CHECKPOINT_STATE_NAME = 'checkpoint_state'
 CHECKPOINT_MARKER_NAME = 'checkpoint_marker'
 CHECKPOINTS_NAME = 'checkpoints'
+
+
+async def consumer_at_end(consumer: Any) -> bool | None:
+    """Whether a Kafka consumer is at the end of its assignment.
+
+    Returns None when the consumer is missing, unassigned, or the
+    probe fails. Caught up is ``position >= end_offset`` so a
+    partition that advanced after ``end_offsets`` was snapshotted
+    is not treated as lag.
+
+    Args:
+        consumer: An aiokafka consumer, or None.
+
+    Returns:
+        True when every assigned partition is at or past the
+        snapshot, False when any assigned partition still has
+        lag, None when readiness cannot be confirmed.
+    """
+    if consumer is None:
+        return None
+    try:
+        assignment = consumer.assignment()
+    except _PROBE_ERRORS:
+        return None
+    if not assignment:
+        return None
+    try:
+        end_offsets = await consumer.end_offsets(assignment)
+        positions = {p: await consumer.position(p) for p in assignment}
+    except _PROBE_ERRORS:
+        return None
+    return all(positions[p] >= end_offsets[p] for p in assignment)
+
+
+async def consumer_lag_downtime(
+    _c: 'Checkpoint',
+    d: 'Dependency',
+) -> timedelta | None:
+    """Treat a dependency as down until its consumer is at the end.
+
+    Use as ``downtime_check`` when the dependent is a timer (or
+    any source that must not emit from stale local cache). Missing
+    or unassigned consumers are also down.
+    """
+    consumer = getattr(d.dependency, 'consumer', None)
+    if await consumer_at_end(consumer) is True:
+        return None
+    return timedelta(seconds=1)
+
+
+async def consumer_lag_recovery(_c: 'Checkpoint', d: 'Dependency') -> bool:
+    """Recover only when the dependency consumer is at the end."""
+    consumer = getattr(d.dependency, 'consumer', None)
+    return await consumer_at_end(consumer) is True
 
 
 class Dependency:
@@ -290,19 +355,7 @@ class Checkpoint:
         if dependency.is_down:
             if await awaitable(dependency.recovery_check(self, dependency)):
                 dependency.is_down = False
-
-            if not any(_.is_down for _ in self.dependencies.values()):
-                _logger.debug(
-                    f'Dependency "{dependency.name}" downtime resolved',
-                )
-                key, c = str(id(self.dependent)), Conf()
-                if self.pause_dependent and key in c.iterables:
-                    c.iterables[key].send_signal(Signal.RESUME)
-                if self._recovery_callback:
-                    if iscoroutinecallable(self._recovery_callback):
-                        await self._recovery_callback(self, dependency)
-                    else:
-                        self._recovery_callback(self, dependency)
+            await self._resume_if_cleared(dependency)
 
         return {
             'is_late': dependency.is_down,
@@ -326,44 +379,79 @@ class Checkpoint:
 
         Returns:
             Any: Typically the timedelta between the last state_marker and
-                the checkpoint_marker since the stream went down.
+                the checkpoint_marker since the stream went down. Truthy
+                when any dependency is down, even if a later dependency
+                is healthy.
         """
         self._save_state(marker, **kwargs)
 
-        downtime = None
-
+        reported = None
         for dependency in self.dependencies.values():
-            # When the dependency stream hasn't had any message yet
-            # set the checkpoint to the very first available state
-            if not dependency.checkpoint_marker:
-                self._save_checkpoint(
-                    dependency,
-                    self.state,
-                    self.state_marker,
-                )
+            down_now = await self._pulse_dependency(dependency)
+            if down_now and reported is None:
+                reported = down_now
 
-            # Trigger on the first dependency that is down and
-            # pause the dependent stream
-            if downtime := await awaitable(
-                dependency.downtime_check(self, dependency)
-            ):
+        if any(_.is_down for _ in self.dependencies.values()):
+            return reported
+        return None
+
+    async def _pulse_dependency(self, dependency: Dependency) -> Any | None:
+        """Update one dependency from the current pulse.
+
+        Returns:
+            A truthy downtime value when this dependency is down.
+        """
+        if not dependency.checkpoint_marker:
+            self._save_checkpoint(
+                dependency,
+                self.state,
+                self.state_marker,
+            )
+
+        down_now = await awaitable(dependency.downtime_check(self, dependency))
+        if down_now:
+            if not dependency.is_down:
                 log_msg = (
                     f'Downtime of dependency "{dependency.name}" detected'
                 )
                 _logger.debug(log_msg)
-                key, c = str(id(self.dependent)), Conf()
-                if self.pause_dependent and key in c.iterables:
-                    c.iterables[key].send_signal(Signal.PAUSE)
+                await self._pause_dependent()
                 if self._downtime_callback:
                     if iscoroutinecallable(self._downtime_callback):
                         await self._downtime_callback(self, dependency)
                     else:
                         self._downtime_callback(self, dependency)
                 dependency.is_down = True
+            return down_now
 
-        if any(_.is_down for _ in self.dependencies.values()):
-            return downtime
+        if dependency.is_down and await awaitable(
+            dependency.recovery_check(self, dependency)
+        ):
+            dependency.is_down = False
+            await self._resume_if_cleared(dependency)
         return None
+
+    async def _pause_dependent(self) -> None:
+        """Pause the dependent iterable when configured to do so."""
+        key, c = str(id(self.dependent)), Conf()
+        if self.pause_dependent and key in c.iterables:
+            c.iterables[key].send_signal(Signal.PAUSE)
+
+    async def _resume_if_cleared(self, dependency: Dependency) -> None:
+        """Resume the dependent stream when no dependency is still down."""
+        if any(_.is_down for _ in self.dependencies.values()):
+            return
+        _logger.debug(
+            f'Dependency "{dependency.name}" downtime resolved',
+        )
+        key, c = str(id(self.dependent)), Conf()
+        if self.pause_dependent and key in c.iterables:
+            c.iterables[key].send_signal(Signal.RESUME)
+        if self._recovery_callback:
+            if iscoroutinecallable(self._recovery_callback):
+                await self._recovery_callback(self, dependency)
+            else:
+                self._recovery_callback(self, dependency)
 
     def _save_state(self, state_marker: datetime | Any, **kwargs: Any) -> None:
         """Save state of the stream (to cache)."""
