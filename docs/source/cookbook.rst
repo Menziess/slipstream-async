@@ -377,10 +377,7 @@ Using :ref:`features:checkpoint` we can detect and act on stream downtimes, paus
         {'timestamp': dt(2023, 1, 1, 13, 10), 'value': 'lunch'},  # 🌧
     ])
 
-Some changes in our setup are required:
-
-- Adding a ``Cache`` for storing the ``Checkpoint``
-- Storing the ``AsyncIterables`` in variables for later reference in the ``Checkpoint``
+Keep the sources in variables so ``depends_on`` can point at the weather stream (or at its handler). A small ``Cache`` persists the gate if you want it to survive a restart.
 
 ::
 
@@ -389,7 +386,7 @@ Some changes in our setup are required:
     from typing import cast
 
     from slipstream import Cache, Topic, handle, stream
-    from slipstream.checkpointing import Checkpoint, Dependency
+    from slipstream.checkpointing import Dependency
     from slipstream.codecs import JsonCodec
     from slipstream.core import READ_FROM_END
 
@@ -410,19 +407,13 @@ Some changes in our setup are required:
     checkpoints_cache = Cache('state/checkpoints', target_table_size=10000)
     weather_cache = Cache('state/weather')
 
-The ``Checkpoint`` defines the relationship between streams:
+    def activity_time(msg):
+        ts = msg.value['timestamp']
+        if isinstance(ts, str):
+            return dt.strptime(ts, '%Y-%m-%d %H:%M:%S')
+        return ts
 
-- The ``activity`` ``Topic`` depends on the ``weather_stream`` ``AsyncIterable``
-- The dependency must be down for 1 hour
-- The ``downtime_callback`` function is called when a downtime is detected
-- The ``recovery_callback`` function is called when the dependency has caught up again
-
-::
-
-    async def downtime_callback(c: Checkpoint, d: Dependency) -> None:
-        print('\tThe stream is automatically paused.')
-
-    async def recovery_callback(c: Checkpoint, d: Dependency) -> None:
+    async def recovery_callback(c, d: Dependency) -> None:
         offsets = cast(dict[str, int], d.checkpoint_state)
         print(
             '\tDowntime resolved, '
@@ -432,29 +423,14 @@ The ``Checkpoint`` defines the relationship between streams:
             int(p): o for p, o in offsets.items()
         })
 
-    checkpoint = Checkpoint(
-        'activity',
-        dependent=activity,
-        dependencies=[Dependency(
-            'weather_stream',
-            weather_stream,
-            downtime_threshold=timedelta(hours=1)
-        )],
-        downtime_callback=downtime_callback,
-        recovery_callback=recovery_callback,
-        cache=checkpoints_cache
-    )
-
-In ``handle_weather`` handler we will "kill" the stream for 5 seconds:
+Weather records already carry a ``timestamp`` datetime, so the leader needs no ``marker``. Activity messages come back from Kafka as JSON strings, so they name their clock. ``depends_on`` is the catch-up gate; seek stays in ``on_recovery``.
 
 ::
 
     @handle(weather_stream, sink=[weather_cache, print])
     async def handle_weather(w):
         """Process weather message."""
-        ts = w['timestamp']
-        unix_ts = ts.timestamp()
-        await checkpoint.heartbeat(ts)
+        unix_ts = w['timestamp'].timestamp()
         yield unix_ts, w
 
         if w['value'] == '⛅':
@@ -467,18 +443,24 @@ In ``handle_weather`` handler we will "kill" the stream for 5 seconds:
         """Send data to activity topic."""
         yield None, val
 
-    @handle(activity, sink=[print])
-    async def handle_activity(msg):
+    @handle(
+        activity,
+        depends_on=handle_weather,
+        marker=activity_time,
+        cache=checkpoints_cache,
+        downtime_threshold=timedelta(hours=1),
+        sink=[print],
+    )
+    async def handle_activity(msg, downtime=None):
         """Process activity message."""
         a = msg.value
-        ts = dt.strptime(a['timestamp'], '%Y-%m-%d %H:%M:%S')
+        ts = activity_time(msg)
         unix_ts = ts.timestamp()
 
-        if downtime := await checkpoint.check_pulse(ts, **{
-            str(msg.partition): msg.offset
-        }):
+        if downtime:
+            lag = next(iter(downtime.values()))
             print(
-                f'\tDowntime detected: {downtime}, '
+                f'\tDowntime detected: {lag}, '
                 '(could cause faulty enrichment)'
             )
 
@@ -488,14 +470,20 @@ In ``handle_weather`` handler we will "kill" the stream for 5 seconds:
 
         yield a["value"], '?'
 
+    handle_activity.checkpoint.on_downtime(
+        lambda c, d: print('\tThe stream is automatically paused.')
+    )
+    handle_activity.checkpoint.on_recovery(recovery_callback)
+
     run(stream())
 
 During the 5 seconds, the activity messages still flow in. This triggers the downtime detection, because the activity event times supercede the last seen weather event time.
 Breakdown:
 
-- ``checkpoint.heartbeat`` registers the weather event time in the checkpoint
-- ``checkpoint.check_pulse`` registers the activity event time, checking the pulse of its dependencies
-- It also passes some state to the checkpoint, in this case; the Kafka offsets
+- Each weather message heartbeats the checkpoint
+- Each activity message pulses it (and stores Kafka offsets)
+- ``downtime`` is a name → lag map when any leader is down, else ``None``.
+  One leader still compares equal to its ``timedelta``.
 
 ::
 

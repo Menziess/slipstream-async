@@ -12,12 +12,15 @@ from collections.abc import (
     Generator,
     Iterable,
 )
+from datetime import timedelta
 from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
+    TYPE_CHECKING,
     Any,
     ClassVar,
     Literal,
+    Protocol,
     cast,
 )
 
@@ -56,6 +59,19 @@ PRODUCE_PAUSE_REASON = 'produce'
 
 
 _logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from slipstream.checkpointing import Checkpoint
+
+
+class Handler(Protocol):
+    """Callable returned by ``@handle``."""
+
+    source: Any
+    sources: tuple[Any, ...]
+    checkpoint: 'Checkpoint | None'
+
+    async def __call__(self, msg: Any, **kwargs: Any) -> Any: ...
 
 
 class PausableStream:
@@ -201,6 +217,7 @@ class Conf(metaclass=Singleton):
     pubsub = PubSub()
     iterables: ClassVar[dict[str, PausableStream]] = {}
     pipes: ClassVar[dict[AsyncCallable, tuple[str, tuple[Pipe, ...]]]] = {}
+    markers: ClassVar[dict[str, Callable[[Any], Any]]] = {}
     exit_hooks: ClassVar[set[AsyncCallable]] = set()
 
     def __init__(self, conf: dict[str, Any] | None = None) -> None:
@@ -761,12 +778,27 @@ def _get_processor(
     return _process_output
 
 
+def _call_kwargs(
+    params: Iterable[Any],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Forward ``**kwargs``, or only ``downtime`` when that param exists."""
+    params = list(params)
+    if any(p.kind == p.VAR_KEYWORD for p in params):
+        return kwargs
+    named = {
+        p.name
+        for p in params
+        if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+    }
+    return {k: v for k, v in kwargs.items() if k in named and k == 'downtime'}
+
+
 def _get_handler(
     f: AsyncCallable, sink: Iterable[Callable | AsyncCallable]
 ) -> Callable[..., Awaitable[Any]]:
     """Get handler wrapper depending on handler signature."""
     params = signature(f).parameters.values()
-    has_kwargs = any(p.kind == p.VAR_KEYWORD for p in params)
     is_coroutine = iscoroutinecallable(f)
     is_asyncgen = isasyncgenfunction(f)
 
@@ -776,31 +808,56 @@ def _get_handler(
 
         async def _handler(msg: Any, **kwargs: Any) -> None:
             """Execute function and handle its output."""
-            output = (
-                await f(msg, **kwargs)
-                if has_kwargs
-                else await f(msg)
-                if params
-                else await f()
-            )
+            extra = _call_kwargs(params, kwargs)
+            if not params:
+                output = await f()
+            elif extra:
+                output = await f(msg, **extra)
+            else:
+                output = await f(msg)
             await _processor(output)
     else:
 
         async def _handler(msg: Any, **kwargs: Any) -> None:
             """Execute function and handle its output."""
-            output = (
-                f(msg, **kwargs) if has_kwargs else f(msg) if params else f()
-            )
+            extra = _call_kwargs(params, kwargs)
+            if not params:
+                output = f()
+            elif extra:
+                output = f(msg, **extra)
+            else:
+                output = f(msg)
             await _processor(output)
 
     return _handler
+
+
+def _unwrap_source(item: Any) -> Any:
+    """Use the source bound on a ``@handle`` wrapper when present."""
+    source = getattr(item, 'source', None)
+    if source is not None:
+        return source
+    return item
+
+
+def _as_dependencies(depends_on: Any) -> tuple[Any, ...]:
+    """Normalize ``depends_on`` without iterating a source."""
+    if not depends_on:
+        return ()
+    if isinstance(depends_on, list | tuple):
+        return tuple(_unwrap_source(item) for item in depends_on)
+    return (_unwrap_source(depends_on),)
 
 
 def handle(
     *iterable: AsyncIterable[Any],
     pipe: Iterable[Pipe] = [],
     sink: Iterable[Callable | AsyncCallable] = [],
-) -> Callable[[AsyncCallable], Callable[..., Awaitable[Any]]]:
+    depends_on: Any = (),
+    marker: Callable[[Any], Any] | str | None = None,
+    cache: ICache | None = None,
+    downtime_threshold: timedelta | None = None,
+) -> Callable[[AsyncCallable], Handler]:
     """Bind sources and sinks to the handler function.
 
     Ex:
@@ -810,16 +867,44 @@ def handle(
         >>> @handle(topic, sink=[print, cache])  # doctest: +SKIP
         ... def handler(msg, **kwargs):
         ...     return msg.key, msg.value
+
+        >>> @handle(topic, depends_on=leader)  # doctest: +SKIP
+        ... def follower(msg, downtime=None):
+        ...     yield msg.key, msg.value
     """
     c = Conf()
+    deps = _as_dependencies(depends_on)
 
-    def _deco(f: AsyncCallable) -> Callable[..., Awaitable[Any]]:
-        handler = _get_handler(f, sink)
+    def _deco(f: AsyncCallable) -> Handler:
+        handler: Any = _get_handler(f, sink)
+        handler.checkpoint = None
+        resolved = None
+        if deps or marker is not None:
+            from slipstream.checkpointing import (
+                bind_handle_gate,
+                coerce_marker,
+            )
+
+            resolved = coerce_marker(marker)
+            if deps:
+                handler = bind_handle_gate(
+                    f,
+                    handler,
+                    iterable,
+                    deps,
+                    resolved,
+                    cache=cache,
+                    downtime_threshold=downtime_threshold,
+                )
+        handler.source = iterable[0] if iterable else None
+        handler.sources = iterable
         for it in iterable:
             iterable_key = str(id(it))
+            if resolved is not None:
+                c.markers[iterable_key] = resolved
             c.register_iterable(iterable_key, it)
             c.register_handler(iterable_key, handler, *pipe)
-        return handler
+        return cast('Handler', handler)
 
     return _deco
 
