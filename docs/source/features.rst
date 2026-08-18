@@ -215,49 +215,49 @@ You can define your own codecs using :py:class:`slipstream.interfaces.ICodec`, s
 Checkpoint
 ^^^^^^^^^^
 
-Checkpoints can be used to detect late data:
+Checkpoints detect late data so a join does not emit against a stale table.
 
 1. Example - `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854?permalink_comment_id=5459889#gistcomment-5459889>`_
 2. Example - `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b?permalink_comment_id=5468001#gistcomment-5468001>`_
 
-A checkpoint consists of one dependent, and many dependency streams:
+Declare the relationship on ``@handle``. The library heartbeats the leader, pulses the dependent, and pauses the dependent when event time falls behind (10 minutes by default):
 
 ::
 
-    async def emoji():
-        for emoji in '🏆📞🐟👌':
-            yield emoji
+    @handle(weather, sink=[weather_cache])
+    async def weather(msg):
+        yield msg.timestamp, msg.value
 
-    dependent, dependency = emoji(), emoji()
+    @handle(activity, depends_on=weather, sink=[print])
+    async def activity(msg, downtime=None):
+        if downtime:
+            print(downtime)  # {'weather': timedelta(...)}
+        yield msg.key, msg.value
 
-    # Cache for persisting one or more Checkpoints
-    checkpoints_cache = Cache('state/checkpoints', target_table_size=10000)
+``depends_on`` accepts a source or an already decorated handler. Event time is inferred from ``timestamp`` / ``event_timestamp`` (datetime or a common string), or from a Kafka record timestamp. Override with ``marker`` (a callable or field name). Persist with ``cache=``; change the lag with ``downtime_threshold=``.
 
-    c = Checkpoint(
-        'dependent', dependent=dependent,
-        dependencies=[Dependency('dependency', dependency)],
-        cache=checkpoints_cache
-    )
+``downtime`` is ``None`` when every leader is healthy, otherwise a name → lag map (or ``True`` if still down but not over threshold this pulse). ``if downtime:`` means any leader is down. One leader still compares equal to its ``timedelta``, so existing ``downtime == timedelta(...)`` checks keep working.
 
-By default ``datetimes`` are compared to detect late data (preferably event times).
-While using ``handle``, the dependent stream will automatically be paused when any dependency streams are down or fall behind 10 minutes.
-This can be configured in :py:class:`slipstream.checkpointing.Dependency`. The pausing behavior can be disabled in :py:class:`slipstream.checkpointing.Checkpoint`.
+A timer that must not emit until a Topic has caught up is the same shape. The library then uses consumer-lag checks and does not pause ticks:
 
 ::
 
-    @handle(dependency)
-    async def dependency_handler(msg):
-        await c.heartbeat(msg.value['event_timestamp'])
-        yield msg.key, msg.value
+    @handle(timer(), depends_on=weather, sink=[print])
+    async def tick(_msg, downtime=None):
+        if downtime:
+            return
 
-    @handle(dependent)
-    async def dependent_handler(msg):
-        await c.check_pulse(marker=msg.value['event_timestamp'])
-        yield msg.key, msg.value
+Recovery (for example ``Topic.seek``) is still explicit:
 
-When the dependency stream recovers, it might have to process a backlog of messages. So the dependent stream will remain paused until the dependency stream has caught up.
+::
 
-Heartbeat returns latency info which can be used to handle late data differently (e.g. buffer or drop):
+    activity.checkpoint.on_recovery(rewind)
+
+You can still build :py:class:`slipstream.checkpointing.Checkpoint` and :py:class:`slipstream.checkpointing.Dependency` yourself when you need custom checks or callbacks at construction time.
+
+When the dependency stream recovers, it might have to process a backlog. The dependent stays paused until the dependency has caught up.
+
+``heartbeat`` (when called manually) returns latency info:
 
 ::
 
@@ -269,14 +269,4 @@ Heartbeat returns latency info which can be used to handle late data differently
     ..     'dependency_marker': datetime(2025, 1, 1, 9),
     .. }
 
-Check pulse returns whatever the ``downtime_check`` of the dependency returns. By default it's a ``timedelta`` object.
-
-It also takes arbitrary additional state (kwargs), which can be utilized to reprocess data.
-In the example above "Downtime reprocessing", the offset was stored per partition, allowing to seek back to the time at which the dependency went down.
-
-::
-
-    if downtime := await checkpoint.check_pulse(ts, **{
-        str(partition): offset
-    }):
-        print(f'Downtime detected: {downtime}')
+``check_pulse`` returns that same name → check map (or ``None``). Topic dependents also store ``{partition: offset}`` so a recovery callback can seek.

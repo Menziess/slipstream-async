@@ -1,6 +1,7 @@
 """Top level objects."""
 
 from slipstream.caching import rocksdict_available
+from slipstream.checkpointing import Checkpoint
 from slipstream.core import Conf, aiokafka_available, handle, stream
 
 if rocksdict_available:
@@ -11,6 +12,7 @@ if aiokafka_available:
 
 
 __all__ = [
+    'Checkpoint',
     'Conf',
     'handle',
     'stream',

@@ -9,11 +9,13 @@ from conftest import emoji, iterable_to_async
 from slipstream.checkpointing import (
     Checkpoint,
     Dependency,
+    coerce_marker,
     consumer_at_end,
     consumer_lag_downtime,
     consumer_lag_recovery,
+    infer_marker,
 )
-from slipstream.core import Conf, Signal
+from slipstream.core import Conf, Signal, Topic, handle, stream
 
 UTC = timezone.utc
 
@@ -187,7 +189,8 @@ async def test_check_pulse_downtime_detected(checkpoint, mocker):
     )
 
     # Downtime observed, dependent paused
-    assert isinstance(downtime, timedelta)
+    assert downtime == timedelta(minutes=30)
+    assert downtime == {'dependency': timedelta(minutes=30)}
     assert checkpoint['dependency'].is_down is True
     assert pausable_stream.signal is Signal.PAUSE
 
@@ -363,7 +366,7 @@ async def test_check_pulse_reports_earlier_down_dependency(mock_cache):
         datetime(2025, 1, 1, 10, tzinfo=UTC),
     )
 
-    assert downtime == timedelta(minutes=30)
+    assert downtime == {'down': timedelta(minutes=30)}
     assert down.is_down is True
     assert up.is_down is False
 
@@ -398,6 +401,7 @@ async def test_check_pulse_recovers_without_heartbeat(mock_cache, mocker):
 
     first = await checkpoint.check_pulse(datetime(2025, 1, 1, 10, tzinfo=UTC))
     assert first == timedelta(seconds=1)
+    assert first == {'dependency': timedelta(seconds=1)}
     assert dependency.is_down is True
     assert c.iterables[dependent_key].signal is Signal.PAUSE
 
@@ -527,14 +531,17 @@ async def test_check_pulse_two_deps_one_recovers_stays_paused(
     first_pulse = await checkpoint.check_pulse(
         datetime(2025, 1, 1, 10, tzinfo=UTC),
     )
-    assert first_pulse == timedelta(seconds=1)
+    assert first_pulse == {
+        'first': timedelta(seconds=1),
+        'second': timedelta(seconds=2),
+    }
     assert c.iterables[dependent_key].signal is Signal.PAUSE
 
     first_down = False
     second_pulse = await checkpoint.check_pulse(
         datetime(2025, 1, 1, 10, 0, 1, tzinfo=UTC),
     )
-    assert second_pulse == timedelta(seconds=2)
+    assert second_pulse == {'second': timedelta(seconds=2)}
     assert first.is_down is False
     assert second.is_down is True
     assert c.iterables[dependent_key].signal is Signal.PAUSE
@@ -599,7 +606,9 @@ async def test_check_pulse_stays_truthy_in_hysteresis_band(mock_cache):
 
     over_threshold = False
     band = await checkpoint.check_pulse(t0 + timedelta(minutes=1))
-    assert band is True
+    assert band is not True
+    assert band == True  # noqa: E712
+    assert band == {'dependency': True}
     assert dependency.is_down is True
 
 
@@ -648,3 +657,251 @@ async def test_resume_callback_fires_once_on_overlap(mock_cache):
     await pulse
     await beat
     assert calls == ['dependency']
+
+
+def test_infer_marker_kafka_timestamp():
+    """Should convert Kafka millisecond timestamps to datetime."""
+
+    class _Rec:
+        timestamp = int(
+            datetime(2025, 1, 1, 10, tzinfo=UTC).timestamp() * 1000
+        )
+        partition = 0
+        offset = 3
+
+    marker = infer_marker(_Rec())
+    assert isinstance(marker, datetime)
+    assert marker == datetime.fromtimestamp(_Rec.timestamp / 1000, tz=UTC)
+
+
+def test_for_handler_without_gate():
+    """Should raise when no depends_on bound a checkpoint."""
+
+    def orphan(_msg):
+        return None
+
+    with pytest.raises(KeyError, match='No checkpoint bound'):
+        Checkpoint.for_handler(orphan)
+
+
+@pytest.mark.asyncio
+async def test_handle_depends_on_heartbeats_and_pulses():
+    """Should heartbeat the leader and pulse the dependent."""
+
+    async def weather():
+        yield {'timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC)}
+
+    async def activity():
+        await sleep(0.05)
+        yield {'timestamp': datetime(2025, 1, 1, 10, 5, tzinfo=UTC)}
+
+    weather_s, activity_s = weather(), activity()
+    seen = []
+
+    @handle(weather_s)
+    def weather_handler(msg):
+        return msg
+
+    @handle(activity_s, depends_on=weather_handler)
+    def activity_handler(msg):
+        seen.append(msg)
+
+    await stream()
+
+    c = Checkpoint.for_handler(activity_handler)
+    assert activity_handler.checkpoint is c  # type: ignore[attr-defined]
+    dep = next(iter(c.dependencies.values()))
+    assert dep.checkpoint_marker == datetime(2025, 1, 1, 10, tzinfo=UTC)
+    assert c.state_marker == datetime(2025, 1, 1, 10, 5, tzinfo=UTC)
+    assert dep.is_down is False
+    assert seen == [{'timestamp': datetime(2025, 1, 1, 10, 5, tzinfo=UTC)}]
+
+
+@pytest.mark.asyncio
+async def test_handle_depends_on_detects_downtime():
+    """Should pause the dependent when event-time lag exceeds threshold."""
+
+    async def weather():
+        yield {'timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC)}
+
+    async def activity():
+        await sleep(0.05)
+        yield {'timestamp': datetime(2025, 1, 1, 11, tzinfo=UTC)}
+
+    weather_s, activity_s = weather(), activity()
+
+    @handle(weather_s)
+    def weather_handler(_msg):
+        return None
+
+    @handle(activity_s, depends_on=weather_s)
+    def activity_handler(_msg):
+        return None
+
+    await stream()
+
+    c = Checkpoint.for_handler(activity_handler)
+    dep = next(iter(c.dependencies.values()))
+    assert dep.is_down is True
+    key = str(id(activity_s))
+    assert Conf().iterables[key].signal is Signal.PAUSE
+
+
+@pytest.mark.asyncio
+async def test_handle_depends_on_recovery_callback():
+    """Should invoke on_recovery after the leader catches up."""
+    recovered = []
+
+    async def weather():
+        yield {'timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC)}
+        await sleep(0.08)
+        yield {'timestamp': datetime(2025, 1, 1, 11, 1, tzinfo=UTC)}
+
+    async def activity():
+        await sleep(0.04)
+        yield {'timestamp': datetime(2025, 1, 1, 11, tzinfo=UTC)}
+
+    weather_s, activity_s = weather(), activity()
+
+    @handle(weather_s)
+    def weather_handler(_msg):
+        return None
+
+    @handle(activity_s, depends_on=weather_s)
+    def activity_handler(_msg):
+        return None
+
+    Checkpoint.for_handler(activity_handler).on_recovery(
+        lambda _c, d: recovered.append(d.name),
+    )
+    await stream()
+    assert recovered
+
+
+@pytest.mark.asyncio
+async def test_handle_timer_depends_on_topic_uses_lag():
+    """Should use consumer-lag checks and not pause a non-Topic dependent."""
+    topic = Topic('weather', {'bootstrap_servers': 'localhost:9092'})
+
+    async def ticks():
+        yield 1
+
+    ticks_s = ticks()
+
+    @handle(ticks_s, depends_on=topic)
+    def tick(_msg):
+        return None
+
+    c = Checkpoint.for_handler(tick)
+    assert c.pause_dependent is False
+    assert 'weather' in c.dependencies
+    dep = c['weather']
+    assert dep.downtime_check is consumer_lag_downtime
+    assert dep.recovery_check is consumer_lag_recovery
+
+
+@pytest.mark.asyncio
+async def test_handle_depends_on_rejects_self():
+    """Should reject a source that depends on itself."""
+
+    async def msgs():
+        yield 1
+
+    src = msgs()
+    with pytest.raises(ValueError, match='cannot include the handler source'):
+
+        @handle(src, depends_on=src)
+        def _(_msg):
+            return None
+
+
+def test_handle_without_depends_on_has_no_checkpoint():
+    """Should leave handlers without depends_on unbound."""
+
+    async def msgs():
+        yield 1
+
+    @handle(msgs())
+    def plain(_msg):
+        return None
+
+    with pytest.raises(KeyError, match='No checkpoint bound'):
+        Checkpoint.for_handler(plain)
+
+
+def test_infer_marker_from_dict():
+    """Should read timestamp or event_timestamp from a mapping."""
+    ts = datetime(2025, 1, 1, 10, tzinfo=UTC)
+    assert infer_marker({'timestamp': ts, 'value': 1}) == ts
+    assert infer_marker({'event_timestamp': ts}) == ts
+    parsed = infer_marker({'timestamp': '2025-01-01 10:00:00'})
+    assert parsed == datetime(2025, 1, 1, 10)  # noqa: DTZ001
+
+
+@pytest.mark.asyncio
+async def test_check_pulse_skips_seed_for_custom_check(mock_cache):
+    """Should not copy the dependent clock into a lag-style dependency."""
+
+    def never_datetime(_c, _d):
+        return None
+
+    dependency = Dependency(
+        'leader',
+        iterable_to_async([]),
+        downtime_check=never_datetime,
+        recovery_check=lambda _c, _d: True,
+    )
+    checkpoint = Checkpoint(
+        'test',
+        iterable_to_async([]),
+        [dependency],
+        cache=mock_cache,
+        pause_dependent=False,
+    )
+    await checkpoint.check_pulse(datetime(2025, 1, 1, 11, tzinfo=UTC))
+    assert dependency.checkpoint_marker is None
+
+
+def test_coerce_marker_field_name():
+    """Should look up a named field on dicts and record payloads."""
+    pick = coerce_marker('event_time')
+    assert pick is not None
+    ts = datetime(2025, 1, 1, 10, tzinfo=UTC)
+    assert pick({'event_time': ts}) == ts
+
+    rec = type('Rec', (), {'value': {'event_time': ts}})()
+    assert pick(rec) == ts
+    with pytest.raises(TypeError, match='callable or field name'):
+        coerce_marker(1)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_handle_passes_downtime_argument():
+    """Should pass pulse result as downtime when the handler accepts it."""
+    seen = []
+
+    async def weather():
+        yield {'timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC)}
+
+    async def activity():
+        await sleep(0.05)
+        yield {'timestamp': datetime(2025, 1, 1, 11, tzinfo=UTC)}
+
+    weather_s, activity_s = weather(), activity()
+
+    @handle(weather_s)
+    def weather_handler(_msg):
+        return None
+
+    @handle(
+        activity_s,
+        depends_on=weather_handler,
+        downtime_threshold=timedelta(minutes=10),
+    )
+    def activity_handler(_msg, downtime=None):
+        seen.append(downtime)
+
+    await stream()
+    assert seen
+    assert seen[0] == timedelta(hours=1)
+    assert list(seen[0].values()) == [timedelta(hours=1)]

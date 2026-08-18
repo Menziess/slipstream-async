@@ -1,9 +1,15 @@
 """Slipstream checkpointing."""
 
 import logging
-from collections.abc import AsyncIterable, Callable, Generator
-from datetime import datetime, timedelta
-from typing import Any
+from collections.abc import (
+    AsyncIterable,
+    Awaitable,
+    Callable,
+    Generator,
+)
+from datetime import datetime, timedelta, timezone
+from functools import wraps
+from typing import Any, ClassVar
 
 from slipstream.core import Conf, Signal
 from slipstream.interfaces import ICache
@@ -28,6 +34,22 @@ STATE_MARKER_NAME = 'state_marker'
 CHECKPOINT_STATE_NAME = 'checkpoint_state'
 CHECKPOINT_MARKER_NAME = 'checkpoint_marker'
 CHECKPOINTS_NAME = 'checkpoints'
+
+
+class Downtime(dict):
+    """Per-dependency pulse result.
+
+    Falsy when empty. A single entry compares equal to that value, so
+    ``downtime == timedelta(...)`` still holds for one leader.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        """Match a dict, or the sole value when only one leader is down."""
+        if isinstance(other, dict):
+            return dict.__eq__(self, other)
+        if len(self) == 1:
+            return next(iter(self.values())) == other
+        return NotImplemented
 
 
 def _dependency_consumer(d: 'Dependency') -> Any:
@@ -145,6 +167,12 @@ class Dependency:
         self._downtime_check = downtime_check or self._default_downtime_check
         self._recovery_check = recovery_check or self._default_recovery_check
         self.is_down = False
+
+    def uses_event_time_seed(self) -> bool:
+        """Whether a silent leader should inherit the dependent marker."""
+        check = self._downtime_check
+        default = self._default_downtime_check
+        return check is default or getattr(check, '__func__', None) is default
 
     def _checkpoint_key(self, cache_key_prefix: str) -> str:
         """Cache key prefix for this dependency."""
@@ -286,7 +314,7 @@ class Checkpoint:
     dependency messages have been received for 30 minutes:
 
     >>> run(c.check_pulse(marker=datetime(2025, 1, 1, 11), offset=9))
-    datetime.timedelta(seconds=1800)
+    {'dependency': datetime.timedelta(seconds=1800)}
 
     Because the downtime surpasses the default `downtime_threshold`,
     the dependent stream will be paused (and resumed when the
@@ -306,6 +334,8 @@ class Checkpoint:
     If no cache is provided, the checkpoint lifespan will be limited
     to that of the application runtime.
     """
+
+    _by_handler: ClassVar[dict[Callable[..., Any], 'Checkpoint']] = {}
 
     def __init__(
         self,
@@ -399,22 +429,22 @@ class Checkpoint:
                 dependency stream, stored in `state`.
 
         Returns:
-            Any: Typically the timedelta between the last state_marker and
-                the checkpoint_marker since the stream went down. Truthy
-                when any dependency is down, even if a later dependency
-                is healthy or the current downtime_check is falsy.
+            None when every dependency is healthy. Otherwise a
+            :class:`Downtime` map of name → check (or ``True`` if still
+            down but not over threshold). One leader still compares
+            equal to its timedelta / ``True``.
         """
         self._save_state(marker, **kwargs)
 
-        reported = None
+        reported = Downtime()
         for dependency in self.dependencies.values():
             down_now = await self._pulse_dependency(dependency)
-            if down_now and reported is None:
-                reported = down_now
+            if down_now:
+                reported[dependency.name] = down_now
+            elif dependency.is_down:
+                reported[dependency.name] = True
 
-        if any(_.is_down for _ in self.dependencies.values()):
-            return reported if reported is not None else True
-        return None
+        return reported or None
 
     async def _pulse_dependency(self, dependency: Dependency) -> Any | None:
         """Update one dependency from the current pulse.
@@ -422,7 +452,10 @@ class Checkpoint:
         Returns:
             A truthy downtime value when this dependency is down.
         """
-        if not dependency.checkpoint_marker:
+        if (
+            not dependency.checkpoint_marker
+            and dependency.uses_event_time_seed()
+        ):
             self._save_checkpoint(
                 dependency,
                 self.state,
@@ -503,6 +536,41 @@ class Checkpoint:
             checkpoint_marker,
         )
 
+    def on_downtime(
+        self,
+        callback: Callable[['Checkpoint', Dependency], Any],
+    ) -> 'Checkpoint':
+        """Set the callback invoked when a dependency first goes down."""
+        self._downtime_callback = callback
+        return self
+
+    def on_recovery(
+        self,
+        callback: Callable[['Checkpoint', Dependency], Any],
+    ) -> 'Checkpoint':
+        """Set the callback invoked when every dependency has recovered."""
+        self._recovery_callback = callback
+        return self
+
+    @classmethod
+    def for_handler(cls, handler: Callable[..., Any]) -> 'Checkpoint':
+        """Return the checkpoint created by ``@handle(..., depends_on=)``."""
+        try:
+            return cls._by_handler[handler]
+        except KeyError:
+            err_msg = 'No checkpoint bound to this handler.'
+            raise KeyError(err_msg) from None
+
+    @classmethod
+    def bind_handler(
+        cls,
+        handler: Callable[..., Any],
+        checkpoint: 'Checkpoint',
+    ) -> None:
+        """Record the checkpoint created for a ``@handle`` wrapper."""
+        cls._by_handler[handler] = checkpoint
+        handler.checkpoint = checkpoint  # type: ignore[attr-defined]
+
     def __getitem__(self, key: str) -> Dependency:
         """Get dependency from dependencies."""
         return self.dependencies[key]
@@ -519,3 +587,211 @@ class Checkpoint:
                 },
             },
         )
+
+
+_MARKER_KEYS = ('timestamp', 'event_timestamp')
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    """Parse a datetime or a common timestamp string."""
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(  # noqa: DTZ007
+            value, '%Y-%m-%d %H:%M:%S'
+        )
+    except ValueError:
+        return None
+
+
+def _datetime_from_mapping(obj: Any) -> datetime | None:
+    """Return a datetime from common event-time field names."""
+    if not isinstance(obj, dict):
+        return None
+    for key in _MARKER_KEYS:
+        found = _as_datetime(obj.get(key))
+        if found is not None:
+            return found
+    return None
+
+
+def infer_marker(msg: Any) -> Any:
+    """Use a datetime on the record, or a Kafka timestamp in ms."""
+    found = _datetime_from_mapping(msg)
+    if found is not None:
+        return found
+    parsed = _as_datetime(getattr(msg, 'timestamp', None))
+    if parsed is not None:
+        return parsed
+    ts = getattr(msg, 'timestamp', None)
+    if isinstance(ts, int | float) and hasattr(msg, 'partition'):
+        return datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+    found = _datetime_from_mapping(getattr(msg, 'value', None))
+    if found is not None:
+        return found
+    return msg
+
+
+def coerce_marker(
+    marker: Callable[[Any], Any] | str | None,
+) -> Callable[[Any], Any] | None:
+    """Accept a callable, a field name, or ``None`` (infer)."""
+    if marker is None or callable(marker):
+        return marker
+    if not isinstance(marker, str):
+        err_msg = 'marker must be a callable or field name.'
+        raise TypeError(err_msg)
+    key = marker
+
+    def _pick(msg: Any) -> Any:
+        if isinstance(msg, dict) and key in msg:
+            return _as_datetime(msg[key]) or msg[key]
+        if not isinstance(msg, dict) and hasattr(msg, key):
+            value = getattr(msg, key)
+            return _as_datetime(value) or value
+        payload = getattr(msg, 'value', None)
+        if isinstance(payload, dict) and key in payload:
+            return _as_datetime(payload[key]) or payload[key]
+        return infer_marker(msg)
+
+    return _pick
+
+
+def _pulse_state(msg: Any) -> dict[str, Any]:
+    """Snapshot Topic partition offsets when present."""
+    if hasattr(msg, 'partition') and hasattr(msg, 'offset'):
+        return {str(msg.partition): msg.offset}
+    return {}
+
+
+def _is_topic(it: Any) -> bool:
+    """Whether ``it`` is a Kafka Topic (optional extra)."""
+    from slipstream.core import Topic, aiokafka_available
+
+    return bool(aiokafka_available) and isinstance(it, Topic)
+
+
+def _raw_dependency_name(d: AsyncIterable[Any]) -> str:
+    """Prefer a Topic name; otherwise the object id."""
+    name = getattr(d, 'name', None)
+    if isinstance(name, str) and name:
+        return name
+    return str(id(d))
+
+
+def _dependency_names(
+    deps: tuple[AsyncIterable[Any], ...],
+) -> list[str]:
+    """Return unique names, suffixing with id when a name is reused."""
+    raw = [_raw_dependency_name(d) for d in deps]
+    if len(raw) == len(set(raw)):
+        return raw
+    return [f'{name}_{id(d)}' for name, d in zip(raw, deps, strict=True)]
+
+
+def _marker_of(
+    source: AsyncIterable[Any],
+    handler_marker: Callable[[Any], Any] | None,
+    msg: Any,
+) -> Any:
+    """Resolve a marker from the handler, Conf, or inference."""
+    if handler_marker is not None:
+        return handler_marker(msg)
+    stored = Conf().markers.get(str(id(source)))
+    if stored is not None:
+        return stored(msg)
+    return infer_marker(msg)
+
+
+def _gate_dependencies(
+    deps: tuple[AsyncIterable[Any], ...],
+    names: list[str],
+    use_lag: bool,
+    downtime_threshold: timedelta | None,
+) -> list[Dependency]:
+    """Build Dependency objects for an automatic handle gate."""
+    built = []
+    for d, name in zip(deps, names, strict=True):
+        extra: dict[str, Any] = {}
+        if downtime_threshold is not None:
+            extra['downtime_threshold'] = downtime_threshold
+        if use_lag:
+            extra['downtime_check'] = consumer_lag_downtime
+            extra['recovery_check'] = consumer_lag_recovery
+        built.append(Dependency(name, d, **extra))
+    return built
+
+
+def bind_handle_gate(
+    f: Callable[..., Any],
+    handler: Callable[..., Awaitable[Any]],
+    sources: tuple[AsyncIterable[Any], ...],
+    deps: tuple[AsyncIterable[Any], ...],
+    marker: Callable[[Any], Any] | None,
+    cache: ICache | None = None,
+    downtime_threshold: timedelta | None = None,
+) -> Callable[..., Awaitable[Any]]:
+    """Wire heartbeat and pulse around a ``@handle`` that has ``depends_on``.
+
+    Event-time downtime is the default. When the dependent is not a
+    Topic and every dependency is, use consumer-lag checks and do not
+    pause the dependent (timer catch-up).
+    """
+    if not sources:
+        err_msg = 'depends_on requires a source iterable on @handle.'
+        raise ValueError(err_msg)
+
+    source_ids = {id(it) for it in sources}
+    for d in deps:
+        if id(d) in source_ids:
+            err_msg = 'depends_on cannot include the handler source.'
+            raise ValueError(err_msg)
+
+    dependent = sources[0]
+    use_lag = not _is_topic(dependent) and all(_is_topic(d) for d in deps)
+    names = _dependency_names(deps)
+    dependencies = _gate_dependencies(deps, names, use_lag, downtime_threshold)
+
+    checkpoint = Checkpoint(
+        getattr(f, '__name__', 'handler'),
+        dependent=dependent,
+        dependencies=dependencies,
+        cache=cache,
+        pause_dependent=not use_lag,
+    )
+
+    @wraps(f)
+    async def _pulsed(msg: Any, **kwargs: Any) -> Any:
+        downtime = await checkpoint.check_pulse(
+            _marker_of(dependent, marker, msg),
+            **_pulse_state(msg),
+        )
+        return await handler(msg, downtime=downtime, **kwargs)
+
+    c = Conf()
+    for d, dep_name in zip(deps, names, strict=True):
+        key = str(id(d))
+        if key not in c.iterables:
+            c.register_iterable(key, d)
+
+        async def _heartbeat(
+            msg: Any,
+            _dep: AsyncIterable[Any] = d,
+            _name: str = dep_name,
+            **_kwargs: Any,
+        ) -> None:
+            await checkpoint.heartbeat(
+                _marker_of(_dep, None, msg),
+                _name,
+            )
+
+        c.register_handler(key, _heartbeat)
+
+    Checkpoint.bind_handler(_pulsed, checkpoint)
+    return _pulsed

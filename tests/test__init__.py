@@ -57,3 +57,16 @@ async def test_kwargable_function():
 
     assert is_kwargable is True
     assert is_unkwargable is True
+
+
+@pytest.mark.asyncio
+async def test_named_kwargs_not_injected():
+    """Should not fill extra named params from stream() unless **kwargs."""
+    seen = []
+
+    @handle(iterable_to_async(range(1)))
+    def handler(_msg, env=None):
+        seen.append(env)
+
+    await stream(env='DEV')
+    assert seen == [None]
