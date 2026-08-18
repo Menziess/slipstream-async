@@ -30,6 +30,17 @@ CHECKPOINT_MARKER_NAME = 'checkpoint_marker'
 CHECKPOINTS_NAME = 'checkpoints'
 
 
+def _dependency_consumer(d: 'Dependency') -> Any:
+    """Resolve a Topic wrapper or a raw aiokafka consumer."""
+    wrapped = getattr(d.dependency, 'consumer', None)
+    if wrapped is not None:
+        return wrapped
+    raw = d.dependency
+    if hasattr(raw, 'assignment'):
+        return raw
+    return None
+
+
 async def consumer_at_end(consumer: Any) -> bool | None:
     """Whether a Kafka consumer is at the end of its assignment.
 
@@ -70,18 +81,22 @@ async def consumer_lag_downtime(
 
     Use as ``downtime_check`` when the dependent is a timer (or
     any source that must not emit from stale local cache). Missing
-    or unassigned consumers are also down.
+    or unassigned consumers are also down. Pair with
+    ``consumer_lag_recovery``; the default event-time recovery
+    check will not resume a timer after the first-pulse seed.
     """
-    consumer = getattr(d.dependency, 'consumer', None)
-    if await consumer_at_end(consumer) is True:
+    if await consumer_at_end(_dependency_consumer(d)) is True:
         return None
     return timedelta(seconds=1)
 
 
 async def consumer_lag_recovery(_c: 'Checkpoint', d: 'Dependency') -> bool:
-    """Recover only when the dependency consumer is at the end."""
-    consumer = getattr(d.dependency, 'consumer', None)
-    return await consumer_at_end(consumer) is True
+    """Recover only when the dependency consumer is at the end.
+
+    Pair with ``consumer_lag_downtime``. Accepts a ``Topic`` or a
+    raw aiokafka consumer as ``d.dependency``.
+    """
+    return await consumer_at_end(_dependency_consumer(d)) is True
 
 
 class Dependency:
@@ -311,6 +326,7 @@ class Checkpoint:
         self._cache_key = f'{cache_key_prefix}_{name}_'
         self._downtime_callback = downtime_callback
         self._recovery_callback = recovery_callback
+        self._awaiting_resume = False
 
         self.state = {}
         self.state_marker = None
@@ -381,7 +397,7 @@ class Checkpoint:
             Any: Typically the timedelta between the last state_marker and
                 the checkpoint_marker since the stream went down. Truthy
                 when any dependency is down, even if a later dependency
-                is healthy.
+                is healthy or the current downtime_check is falsy.
         """
         self._save_state(marker, **kwargs)
 
@@ -392,7 +408,7 @@ class Checkpoint:
                 reported = down_now
 
         if any(_.is_down for _ in self.dependencies.values()):
-            return reported
+            return reported if reported is not None else True
         return None
 
     async def _pulse_dependency(self, dependency: Dependency) -> Any | None:
@@ -416,6 +432,7 @@ class Checkpoint:
                 )
                 _logger.debug(log_msg)
                 await self._pause_dependent()
+                self._awaiting_resume = True
                 if self._downtime_callback:
                     if iscoroutinecallable(self._downtime_callback):
                         await self._downtime_callback(self, dependency)
@@ -441,6 +458,9 @@ class Checkpoint:
         """Resume the dependent stream when no dependency is still down."""
         if any(_.is_down for _ in self.dependencies.values()):
             return
+        if not self._awaiting_resume:
+            return
+        self._awaiting_resume = False
         _logger.debug(
             f'Dependency "{dependency.name}" downtime resolved',
         )
