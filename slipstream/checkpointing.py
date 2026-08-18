@@ -629,12 +629,12 @@ def infer_marker(msg: Any) -> Any:
     parsed = _as_datetime(getattr(msg, 'timestamp', None))
     if parsed is not None:
         return parsed
-    ts = getattr(msg, 'timestamp', None)
-    if isinstance(ts, int | float) and hasattr(msg, 'partition'):
-        return datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
     found = _datetime_from_mapping(getattr(msg, 'value', None))
     if found is not None:
         return found
+    ts = getattr(msg, 'timestamp', None)
+    if isinstance(ts, int | float) and hasattr(msg, 'partition'):
+        return datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
     return msg
 
 
@@ -652,12 +652,13 @@ def coerce_marker(
     def _pick(msg: Any) -> Any:
         if isinstance(msg, dict) and key in msg:
             return _as_datetime(msg[key]) or msg[key]
-        if not isinstance(msg, dict) and hasattr(msg, key):
-            value = getattr(msg, key)
-            return _as_datetime(value) or value
         payload = getattr(msg, 'value', None)
         if isinstance(payload, dict) and key in payload:
             return _as_datetime(payload[key]) or payload[key]
+        if not isinstance(msg, dict) and hasattr(msg, key):
+            parsed = _as_datetime(getattr(msg, key))
+            if parsed is not None:
+                return parsed
         return infer_marker(msg)
 
     return _pick

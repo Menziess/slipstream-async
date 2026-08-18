@@ -659,6 +659,34 @@ async def test_resume_callback_fires_once_on_overlap(mock_cache):
     assert calls == ['dependency']
 
 
+def test_infer_marker_prefers_payload_over_broker_time():
+    """Should use JSON event time before Kafka broker milliseconds."""
+    event = datetime(2025, 1, 1, 10, tzinfo=UTC)
+    rec = type(
+        'Rec',
+        (),
+        {'timestamp': 0, 'partition': 0, 'value': {'timestamp': event}},
+    )()
+    assert infer_marker(rec) == event
+
+
+def test_coerce_marker_prefers_payload_timestamp():
+    """Should treat marker='timestamp' as the payload field on a record."""
+    event = datetime(2025, 1, 1, 10, tzinfo=UTC)
+    pick = coerce_marker('timestamp')
+    assert pick is not None
+    rec = type(
+        'Rec',
+        (),
+        {
+            'timestamp': 1_700_000_000_000,
+            'partition': 0,
+            'value': {'timestamp': event},
+        },
+    )()
+    assert pick(rec) == event
+
+
 def test_infer_marker_kafka_timestamp():
     """Should convert Kafka millisecond timestamps to datetime."""
 
