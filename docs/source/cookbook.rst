@@ -519,6 +519,10 @@ Notice that when sending out corrections is required (using :py:class:`slipstrea
 This must be handled appropriately when dealing with stateful aggregations (prevent counting/summing an event twice).
 All consumers of the data must also be capable of dealing with corrections, by compacting/deduplicating the data by some key.
 
+Do not pause a wall-clock timer with ``pause_dependent=True``. Paused ticks are dropped, not queued, so a timeout latch can fire late or never. Prefer ``pause_dependent=False`` and skip the tick when ``check_pulse`` is truthy. Use :py:func:`slipstream.checkpointing.consumer_lag_downtime` and :py:func:`slipstream.checkpointing.consumer_lag_recovery` together when the dependency is a Kafka consumer that must be at the end of its assignment before the timer may emit. ``check_pulse`` re-runs recovery, so the next tick can resume without waiting for a later Kafka heartbeat.
+
+The first pulse still copies the dependent marker into a dependency that has never heartbeated. That is correct for event-time Kafka joins (so a silent leader is detected). It is the wrong seed if the dependent is a timer: wall-clock is written into the leader marker. Do not mix a timer dependent with the default datetime downtime check.
+
 Endpoint
 ^^^^^^^^
 
