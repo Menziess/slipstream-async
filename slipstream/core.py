@@ -52,6 +52,7 @@ __all__ = [
 
 READ_FROM_START = -2
 READ_FROM_END = -1
+PRODUCE_PAUSE_REASON = 'produce'
 
 
 _logger = logging.getLogger(__name__)
@@ -67,9 +68,12 @@ class PausableStream:
 
     For example, the Topic class uses the signal to pause the Consumer.
 
-    Any value can be sent as a Signal, but only Signal.PAUSE will trigger
-    a pause in consumption of the iterable in PausableStream. Any other
-    value will resume the PausableStream.
+    Only ``Signal.PAUSE`` pauses consumption; ``Signal.RESUME``
+    resumes it when no other pause reasons remain.
+
+    Pause and resume are tracked per ``reason`` so independent callers
+    compose (checkpoint downtime vs produce retry). Use ``counted=True``
+    when overlapping pauses share a reason, such as concurrent produces.
     """
 
     @property
@@ -81,17 +85,52 @@ class PausableStream:
         """Create instance that holds iterable and queue to pause it."""
         self._iterable: AsyncIterable[Any] = it
         self._iterator: AsyncIterator[Any] | None = None
+        self._pause_counts: dict[str, int] = {}
         self.signal: Signal | Any = None
         self.running: Event = Event()
         self.running.set()
 
-    def send_signal(self, signal: Signal | Any) -> None:
-        """Send signal to stream."""
+    def send_signal(
+        self,
+        signal: Signal | Any,
+        reason: str = '',
+        *,
+        counted: bool = False,
+    ) -> None:
+        """Send signal to stream.
+
+        ``PAUSE``/``RESUME`` compose by ``reason``. A counted reason
+        increments on pause and decrements on resume; an uncounted
+        reason latches until resumed. Resume is applied only when no
+        reasons remain.
+        """
+        if signal is Signal.PAUSE:
+            if counted:
+                self._pause_counts[reason] = (
+                    self._pause_counts.get(reason, 0) + 1
+                )
+            else:
+                self._pause_counts[reason] = 1
+            self.signal = Signal.PAUSE
+            if self.running.is_set():
+                self.running.clear()
+            return
+        if signal is Signal.RESUME:
+            if counted:
+                remaining = self._pause_counts.get(reason, 0) - 1
+                if remaining > 0:
+                    self._pause_counts[reason] = remaining
+                else:
+                    self._pause_counts.pop(reason, None)
+            else:
+                self._pause_counts.pop(reason, None)
+            if self._pause_counts:
+                return
+            self.signal = Signal.RESUME
+            if not self.running.is_set():
+                self.running.set()
+            return
         self.signal = signal
-        if signal is Signal.PAUSE and self.running.is_set():
-            self.running.clear()
-        elif signal is Signal.RESUME and not self.running.is_set():
-            self.running.set()
 
     def __aiter__(self) -> AsyncIterator[Any]:
         """Create iterator."""
@@ -190,10 +229,16 @@ class Conf(metaclass=Singleton):
         """Add exit hook that's called on shutdown."""
         self.exit_hooks.add(exit_hook)
 
-    def signal_iterables(self, signal: Signal) -> None:
+    def signal_iterables(
+        self,
+        signal: Signal,
+        reason: str = '',
+        *,
+        counted: bool = False,
+    ) -> None:
         """Send ``signal`` to every registered source stream."""
         for stream in self.iterables.values():
-            stream.send_signal(signal)
+            stream.send_signal(signal, reason, counted=counted)
 
     async def start(self, **kwargs: Any) -> None:
         """Start processing registered iterables."""
@@ -292,31 +337,20 @@ if aiokafka_available:
         ConsumerRecord,
         TopicPartition,
     )
-    from aiokafka.errors import (
-        KafkaConnectionError,
-        KafkaTimeoutError,
-        LeaderNotAvailableError,
-        NodeNotReadyError,
-        NotLeaderForPartitionError,
-        RequestTimedOutError,
-    )
+    from aiokafka.errors import KafkaTimeoutError
     from aiokafka.helpers import create_ssl_context
 
-    _RETRIABLE_PRODUCE_ERRORS = (
-        RequestTimedOutError,
-        NodeNotReadyError,
-        KafkaConnectionError,
-        KafkaTimeoutError,
-        NotLeaderForPartitionError,
-        LeaderNotAvailableError,
-        TimeoutError,
-        ConnectionError,
-        OSError,
-    )
-
     def is_retriable_produce_error(exc: BaseException) -> bool:
-        """Return whether a produce failure is safe to retry."""
-        return isinstance(exc, _RETRIABLE_PRODUCE_ERRORS)
+        """Return whether a produce failure is safe to retry.
+
+        Trust aiokafka's ``retriable`` flag so the set cannot drift.
+        ``KafkaTimeoutError`` is not flagged retriable but is raised
+        when ``send_and_wait`` cannot enqueue before
+        ``request_timeout_ms``.
+        """
+        return bool(getattr(exc, 'retriable', False)) or isinstance(
+            exc, KafkaTimeoutError
+        )
 
     class Topic:
         """Act as a consumer and producer.
@@ -556,7 +590,11 @@ if aiokafka_available:
                             _logger.exception(err_msg)
                             raise RuntimeError(err_msg) from e
                         if not paused:
-                            Conf().signal_iterables(Signal.PAUSE)
+                            Conf().signal_iterables(
+                                Signal.PAUSE,
+                                PRODUCE_PAUSE_REASON,
+                                counted=True,
+                            )
                             paused = True
                         _logger.warning(
                             'Retrying produce to Topic %s (%s/%s) after %s',
@@ -571,7 +609,11 @@ if aiokafka_available:
                         return
             finally:
                 if paused:
-                    Conf().signal_iterables(Signal.RESUME)
+                    Conf().signal_iterables(
+                        Signal.RESUME,
+                        PRODUCE_PAUSE_REASON,
+                        counted=True,
+                    )
 
         async def _get_generator(
             self,
