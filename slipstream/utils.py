@@ -95,10 +95,7 @@ class PubSub(metaclass=Singleton):
         if topic not in self._topics:
             return
         for listener in self._topics[topic]:
-            if iscoroutinecallable(listener):
-                await listener(*args, **kwargs)
-            else:
-                listener(*args, **kwargs)
+            await awaitable(listener(*args, **kwargs))
 
     async def iter_topic(self, topic: str) -> AsyncIterator[Any]:
         """Asynchronously iterate over messages published to a topic."""
