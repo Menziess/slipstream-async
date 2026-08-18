@@ -191,9 +191,9 @@ if rocksdict_available:
             """Set custom dumps function."""
             return self.db.set_dumps(dumps)
 
-        def set_loads(self, dumps: Callable[[bytes], Any]) -> None:
+        def set_loads(self, loads: Callable[[bytes], Any]) -> None:
             """Set custom loads function."""
-            return self.db.set_loads(dumps)
+            return self.db.set_loads(loads)
 
         def set_read_options(self, read_opt: ReadOptions) -> None:
             """Set custom read options."""
@@ -268,6 +268,22 @@ if rocksdict_available:
             """Get iterable."""
             return self.db.iter(read_opt)
 
+        @staticmethod
+        def _scan(
+            rows: Iterator[T],
+            prefix: Key | None,
+            key_of: Callable[[T], Key],
+            project: Callable[[T], Any] | None = None,
+        ) -> Iterator[Any]:
+            """Stop a rocksdict scan when ``prefix`` no longer matches."""
+            prefix_str = str(prefix)
+            for row in rows:
+                if prefix is not None and not str(key_of(row)).startswith(
+                    prefix_str
+                ):
+                    break
+                yield project(row) if project else row
+
         def items(
             self,
             backwards: bool = False,
@@ -276,14 +292,12 @@ if rocksdict_available:
             prefix: Key | None = None,
         ) -> Iterator[tuple[Key, Any]]:
             """Get tuples of key-value pairs."""
-            effective_from_key = from_key if from_key is not None else prefix
-            prefix_str = str(prefix)
-            for key, value in self.db.items(
-                backwards, effective_from_key, read_opt
-            ):
-                if prefix is not None and not str(key).startswith(prefix_str):
-                    break
-                yield (key, value)
+            start = from_key if from_key is not None else prefix
+            return self._scan(
+                self.db.items(backwards, start, read_opt),
+                prefix,
+                lambda row: row[0],
+            )
 
         def keys(
             self,
@@ -293,12 +307,12 @@ if rocksdict_available:
             prefix: Key | None = None,
         ) -> Iterator[Key]:
             """Get keys."""
-            effective_from_key = from_key if from_key is not None else prefix
-            prefix_str = str(prefix)
-            for key in self.db.keys(backwards, effective_from_key, read_opt):
-                if prefix is not None and not str(key).startswith(prefix_str):
-                    break
-                yield key
+            start = from_key if from_key is not None else prefix
+            return self._scan(
+                self.db.keys(backwards, start, read_opt),
+                prefix,
+                lambda key: key,
+            )
 
         def values(
             self,
@@ -308,14 +322,13 @@ if rocksdict_available:
             prefix: Key | None = None,
         ) -> Iterator[Any]:
             """Get values."""
-            effective_from_key = from_key if from_key is not None else prefix
-            prefix_str = str(prefix)
-            for key, value in self.db.items(
-                backwards, effective_from_key, read_opt
-            ):
-                if prefix is not None and not str(key).startswith(prefix_str):
-                    break
-                yield value
+            start = from_key if from_key is not None else prefix
+            return self._scan(
+                self.db.items(backwards, start, read_opt),
+                prefix,
+                lambda row: row[0],
+                lambda row: row[1],
+            )
 
         def columns(
             self,
@@ -325,14 +338,13 @@ if rocksdict_available:
             prefix: Key | None = None,
         ) -> Iterator[list[tuple[Any, Any]]]:
             """Get values as widecolumns."""
-            effective_from_key = from_key if from_key is not None else prefix
-            prefix_str = str(prefix)
-            for key, columns in self.db.entities(
-                backwards, effective_from_key, read_opt
-            ):
-                if prefix is not None and not str(key).startswith(prefix_str):
-                    break
-                yield columns
+            start = from_key if from_key is not None else prefix
+            return self._scan(
+                self.db.entities(backwards, start, read_opt),
+                prefix,
+                lambda row: row[0],
+                lambda row: row[1],
+            )
 
         def entities(
             self,
@@ -342,14 +354,12 @@ if rocksdict_available:
             prefix: Key | None = None,
         ) -> Iterator[tuple[Key, list[tuple[Any, Any]]]]:
             """Get keys and entities."""
-            effective_from_key = from_key if from_key is not None else prefix
-            prefix_str = str(prefix)
-            for key, columns in self.db.entities(
-                backwards, effective_from_key, read_opt
-            ):
-                if prefix is not None and not str(key).startswith(prefix_str):
-                    break
-                yield (key, columns)
+            start = from_key if from_key is not None else prefix
+            return self._scan(
+                self.db.entities(backwards, start, read_opt),
+                prefix,
+                lambda row: row[0],
+            )
 
         def ingest_external_file(
             self,
@@ -377,7 +387,7 @@ if rocksdict_available:
             name: str,
             options: Options | None = None,
         ) -> Rdict:
-            """Craete column family."""
+            """Create column family."""
             options = options or Options()
             return self.db.create_column_family(name, options)
 

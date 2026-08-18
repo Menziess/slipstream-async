@@ -313,9 +313,6 @@ class Conf(metaclass=Singleton):
             key = sub('[^0-9a-zA-Z]+', '_', key)
             setattr(self, key, value)
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        super().__setattr__(name, value)
-
     def __getattr__(self, name: str) -> Any:
         if name in self.conf:
             return self.conf[name]
@@ -431,6 +428,18 @@ if aiokafka_available:
             ) and not self.conf.get('ssl_context'):
                 self.conf['ssl_context'] = create_ssl_context()
 
+        def _maybe_encode(self, val: Any, serializer: str) -> Any:
+            """Encode ``str`` when no serializer is configured."""
+            if isinstance(val, str) and not self.conf.get(serializer):
+                return val.encode()
+            return val
+
+        def _maybe_decode(self, val: Any, deserializer: str) -> Any:
+            """Decode ``bytes`` when no deserializer is configured."""
+            if isinstance(val, bytes) and not self.conf.get(deserializer):
+                return val.decode()
+            return val
+
         @property
         async def admin(self) -> AIOKafkaClient:
             """Get started instance of Kafka admin client."""
@@ -533,12 +542,8 @@ if aiokafka_available:
             **kwargs: Any,
         ) -> None:
             """Produce message to topic."""
-            if isinstance(key, str) and not self.conf.get('key_serializer'):
-                key = key.encode()
-            if isinstance(value, str) and not self.conf.get(
-                'value_serializer',
-            ):
-                value = value.encode()
+            key = self._maybe_encode(key, 'key_serializer')
+            value = self._maybe_encode(value, 'value_serializer')
             headers_list = (
                 [(k, v.encode()) for k, v in headers.items()]
                 if headers
@@ -627,14 +632,10 @@ if aiokafka_available:
             try:
                 msg: ConsumerRecord[Any, Any]
                 async for msg in consumer:
-                    if isinstance(msg.key, bytes) and not self.conf.get(
-                        'key_deserializer',
-                    ):
-                        msg.key = msg.key.decode()
-                    if isinstance(msg.value, bytes) and not self.conf.get(
-                        'value_deserializer',
-                    ):
-                        msg.value = msg.value.decode()
+                    msg.key = self._maybe_decode(msg.key, 'key_deserializer')
+                    msg.value = self._maybe_decode(
+                        msg.value, 'value_deserializer'
+                    )
 
                     signal = yield msg
 

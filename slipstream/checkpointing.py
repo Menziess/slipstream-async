@@ -7,7 +7,7 @@ from typing import Any
 
 from slipstream.core import Conf, Signal
 from slipstream.interfaces import ICache
-from slipstream.utils import AsyncCallable, awaitable, iscoroutinecallable
+from slipstream.utils import AsyncCallable, awaitable
 
 try:
     from aiokafka.errors import KafkaError
@@ -146,6 +146,10 @@ class Dependency:
         self._recovery_check = recovery_check or self._default_recovery_check
         self.is_down = False
 
+    def _checkpoint_key(self, cache_key_prefix: str) -> str:
+        """Cache key prefix for this dependency."""
+        return f'{cache_key_prefix}{self.name}_'
+
     def save(
         self,
         cache: ICache,
@@ -154,15 +158,32 @@ class Dependency:
         checkpoint_marker: datetime,
     ) -> None:
         """Save checkpoint state to cache."""
-        key = f'{cache_key_prefix}{self.name}_'
+        key = self._checkpoint_key(cache_key_prefix)
         cache[key + CHECKPOINT_STATE_NAME] = checkpoint_state
         cache[key + CHECKPOINT_MARKER_NAME] = checkpoint_marker
 
     def load(self, cache: ICache, cache_key_prefix: str) -> None:
         """Load checkpoint state from cache."""
-        key = f'{cache_key_prefix}{self.name}_'
+        key = self._checkpoint_key(cache_key_prefix)
         self.checkpoint_state = cache[key + CHECKPOINT_STATE_NAME]
         self.checkpoint_marker = cache[key + CHECKPOINT_MARKER_NAME]
+
+    @staticmethod
+    def _require_datetime_markers(
+        c: 'Checkpoint',
+        d: 'Dependency',
+        check: str,
+    ) -> tuple[datetime, datetime]:
+        """Return both markers or raise if either is not a datetime."""
+        marker, checkpoint = c.state_marker, d.checkpoint_marker
+        if isinstance(marker, datetime) and isinstance(checkpoint, datetime):
+            return marker, checkpoint
+        err_msg = (
+            'Expecting either `datetime` markers in heartbeat and '
+            f'check_pulse, or a custom {check} in dependency, '
+            f'got; {marker} and {checkpoint}'
+        )
+        raise TypeError(err_msg)
 
     @staticmethod
     def _default_downtime_check(
@@ -174,18 +195,10 @@ class Dependency:
         This behavior can be overridden by passing a callable to
         `downtime_check` that takes a `Checkpoint` object.
         """
-        if not (
-            isinstance(c.state_marker, datetime)
-            and isinstance(d.checkpoint_marker, datetime)
-        ):
-            err_msg = (
-                'Expecting either `datetime` markers in heartbeat and '
-                'check_pulse, or a custom downtime_check in dependency, '
-                f'got; {c.state_marker} and {d.checkpoint_marker}'
-            )
-            raise TypeError(err_msg)
-
-        diff = c.state_marker - d.checkpoint_marker
+        marker, checkpoint = Dependency._require_datetime_markers(
+            c, d, 'downtime_check'
+        )
+        diff = marker - checkpoint
         if diff > d.downtime_threshold:
             return diff
         return None
@@ -197,18 +210,10 @@ class Dependency:
         This behavior can be overridden by passing a callable to
         `recovery_check` that takes a `Checkpoint` object.
         """
-        if not (
-            isinstance(c.state_marker, datetime)
-            and isinstance(d.checkpoint_marker, datetime)
-        ):
-            err_msg = (
-                'Expecting either `datetime` markers in heartbeat and '
-                'check_pulse, or a custom recovery_check in dependency, '
-                f'got; {c.state_marker} and {d.checkpoint_marker}'
-            )
-            raise TypeError(err_msg)
-
-        return d.checkpoint_marker > c.state_marker
+        marker, checkpoint = Dependency._require_datetime_markers(
+            c, d, 'recovery_check'
+        )
+        return checkpoint > marker
 
     def __iter__(self) -> Generator[tuple[str, Any | None], None, None]:
         """Get relevant values when dict is called."""
@@ -434,10 +439,7 @@ class Checkpoint:
                 await self._pause_dependent()
                 self._awaiting_resume = True
                 if self._downtime_callback:
-                    if iscoroutinecallable(self._downtime_callback):
-                        await self._downtime_callback(self, dependency)
-                    else:
-                        self._downtime_callback(self, dependency)
+                    await awaitable(self._downtime_callback(self, dependency))
                 dependency.is_down = True
             return down_now
 
@@ -448,11 +450,15 @@ class Checkpoint:
             await self._resume_if_cleared(dependency)
         return None
 
-    async def _pause_dependent(self) -> None:
-        """Pause the dependent iterable when configured to do so."""
+    def _signal_dependent(self, signal: Signal) -> None:
+        """Pause or resume the dependent iterable when configured to do so."""
         key, c = str(id(self.dependent)), Conf()
         if self.pause_dependent and key in c.iterables:
-            c.iterables[key].send_signal(Signal.PAUSE)
+            c.iterables[key].send_signal(signal)
+
+    async def _pause_dependent(self) -> None:
+        """Pause the dependent iterable when configured to do so."""
+        self._signal_dependent(Signal.PAUSE)
 
     async def _resume_if_cleared(self, dependency: Dependency) -> None:
         """Resume the dependent stream when no dependency is still down."""
@@ -464,14 +470,9 @@ class Checkpoint:
         _logger.debug(
             f'Dependency "{dependency.name}" downtime resolved',
         )
-        key, c = str(id(self.dependent)), Conf()
-        if self.pause_dependent and key in c.iterables:
-            c.iterables[key].send_signal(Signal.RESUME)
+        self._signal_dependent(Signal.RESUME)
         if self._recovery_callback:
-            if iscoroutinecallable(self._recovery_callback):
-                await self._recovery_callback(self, dependency)
-            else:
-                self._recovery_callback(self, dependency)
+            await awaitable(self._recovery_callback(self, dependency))
 
     def _save_state(self, state_marker: datetime | Any, **kwargs: Any) -> None:
         """Save state of the stream (to cache)."""
