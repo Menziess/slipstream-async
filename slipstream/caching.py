@@ -23,6 +23,7 @@ __all__ = [
     'MB',
     'MINUTES',
     'Cache',
+    'Proxy',
 ]
 
 

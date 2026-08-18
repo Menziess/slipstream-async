@@ -25,18 +25,15 @@ async def test_proxy():
     assert p._pubsub is not None
     assert p._iterable_key is not None
 
-    result = None
-
     async def send():
         await p('test')
 
     async def receive():
-        nonlocal result
         async for item in p:
-            result = item
-            break
+            return item
+        return None
 
-    await gather(receive(), send())
+    result, _ = await gather(receive(), send())
     assert result == 'test'
 
 
