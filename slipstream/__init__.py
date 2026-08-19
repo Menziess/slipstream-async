@@ -10,12 +10,35 @@ if rocksdict_available:
 if aiokafka_available:
     from slipstream.core import Topic as Topic
 
-
-__all__ = [
-    'Checkpoint',
-    'Conf',
-    'handle',
-    'stream',
-    *(['Cache'] if rocksdict_available else []),
-    *(['Topic'] if aiokafka_available else []),
-]
+if rocksdict_available and aiokafka_available:
+    __all__ = [
+        'Cache',
+        'Checkpoint',
+        'Conf',
+        'Topic',
+        'handle',
+        'stream',
+    ]
+elif rocksdict_available:
+    __all__ = [
+        'Cache',
+        'Checkpoint',
+        'Conf',
+        'handle',
+        'stream',
+    ]
+elif aiokafka_available:
+    __all__ = [
+        'Checkpoint',
+        'Conf',
+        'Topic',
+        'handle',
+        'stream',
+    ]
+else:
+    __all__ = [
+        'Checkpoint',
+        'Conf',
+        'handle',
+        'stream',
+    ]

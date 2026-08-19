@@ -377,16 +377,12 @@ Using :ref:`features:checkpoint` we can detect and act on stream downtimes, paus
         {'timestamp': dt(2023, 1, 1, 13, 10), 'value': 'lunch'},  # 🌧
     ])
 
-Keep the sources in variables so ``depends_on`` can point at the weather stream (or at its handler). A small ``Cache`` persists the gate if you want it to survive a restart.
-
 ::
 
     from asyncio import run, sleep
     from datetime import timedelta
-    from typing import cast
 
-    from slipstream import Cache, Topic, handle, stream
-    from slipstream.checkpointing import Dependency
+    from slipstream import Cache, Checkpoint, Topic, handle, stream
     from slipstream.codecs import JsonCodec
     from slipstream.core import READ_FROM_END
 
@@ -407,32 +403,43 @@ Keep the sources in variables so ``depends_on`` can point at the weather stream 
     checkpoints_cache = Cache('state/checkpoints', target_table_size=10000)
     weather_cache = Cache('state/weather')
 
-    def activity_time(msg):
-        ts = msg.value['timestamp']
-        if isinstance(ts, str):
-            return dt.strptime(ts, '%Y-%m-%d %H:%M:%S')
-        return ts
+Some changes in our setup are required:
 
-    async def recovery_callback(c, d: Dependency) -> None:
-        offsets = cast(dict[str, int], d.checkpoint_state)
-        print(
+- Adding a ``Cache`` for storing the ``Checkpoint``
+- Storing the ``AsyncIterables`` in variables for later reference in the ``Checkpoint``
+
+The ``Checkpoint`` defines the relationship between streams:
+
+::
+
+    activity_cp = Checkpoint(
+        activity,
+        dependencies=[weather_stream],
+        marker='timestamp',
+        cache=checkpoints_cache,
+        downtime_threshold=timedelta(hours=1),
+        on_downtime=lambda _c, _d: print('\tThe stream is automatically paused.'),
+        on_recovery=lambda _c, d: print(
             '\tDowntime resolved, '
-            f'going back to offset {offsets} for reprocessing.'
-        )
-        await activity.seek({
-            int(p): o for p, o in offsets.items()
-        })
+            f'going back to offset {d.checkpoint_state} for reprocessing.'
+        ) or activity.seek({
+            int(p): o for p, o in d.checkpoint_state.items()
+        }),
+    )
 
-Weather records already carry a ``timestamp`` datetime, so the leader needs no ``marker``. Activity messages come back from Kafka as JSON strings, so they name their clock. ``depends_on`` is the catch-up gate; seek stays in ``on_recovery``.
+- The ``activity`` ``Topic`` depends on the ``weather_stream`` ``AsyncIterable``
+- The dependency must be down for 1 hour (``downtime_threshold``)
+- The ``on_downtime`` callback is called when a downtime is detected
+- The ``on_recovery`` callback is called when the dependency has caught up again
+
+In the ``handle_weather`` handler we will "kill" the stream for 5 seconds:
 
 ::
 
     @handle(weather_stream, sink=[weather_cache, print])
     async def handle_weather(w):
         """Process weather message."""
-        unix_ts = w['timestamp'].timestamp()
-        yield unix_ts, w
-
+        yield w['timestamp'].timestamp(), w
         if w['value'] == '⛅':
             print('\tKilling weather stream on purpose')
             await sleep(5)
@@ -443,47 +450,31 @@ Weather records already carry a ``timestamp`` datetime, so the leader needs no `
         """Send data to activity topic."""
         yield None, val
 
-    @handle(
-        activity,
-        depends_on=handle_weather,
-        marker=activity_time,
-        cache=checkpoints_cache,
-        downtime_threshold=timedelta(hours=1),
-        sink=[print],
-    )
-    async def handle_activity(msg, downtime=None):
+    @handle(activity_cp, sink=[print])
+    async def handle_activity(msg, checkpoint=None):
         """Process activity message."""
         a = msg.value
-        ts = activity_time(msg)
-        unix_ts = ts.timestamp()
-
-        if downtime:
-            lag = next(iter(downtime.values()))
+        ts = dt.strptime(a['timestamp'], '%Y-%m-%d %H:%M:%S')
+        if checkpoint and checkpoint.downtime:
+            lag = next(iter(checkpoint.downtime.values()))
             print(
                 f'\tDowntime detected: {lag}, '
                 '(could cause faulty enrichment)'
             )
-
-        for w in weather_cache.values(backwards=True, from_key=unix_ts):
+        for w in weather_cache.values(backwards=True, from_key=ts.timestamp()):
             yield f'The weather during {a["value"]} was {w["value"]}'
             return
-
-        yield a["value"], '?'
-
-    handle_activity.checkpoint.on_downtime(
-        lambda c, d: print('\tThe stream is automatically paused.')
-    )
-    handle_activity.checkpoint.on_recovery(recovery_callback)
+        yield a['value'], '?'
 
     run(stream())
 
 During the 5 seconds, the activity messages still flow in. This triggers the downtime detection, because the activity event times supercede the last seen weather event time.
+
 Breakdown:
 
-- Each weather message heartbeats the checkpoint
-- Each activity message pulses it (and stores Kafka offsets)
-- ``downtime`` is a name → lag map when any leader is down, else ``None``.
-  One leader still compares equal to its ``timedelta``.
+- Each weather message updates the checkpoint with the weather event time
+- Each activity message checks the pulse of its dependencies
+- Kafka offsets are stored on the checkpoint so we can seek back
 
 ::
 
@@ -498,18 +489,16 @@ Breakdown:
     The weather during shopping was 🌦️
     The weather during lunch was 🌧
 
-- One faulty enrichment took place: ``The weather during shopping was ⛅`` before the ``activity`` stream was paused (waiting for the ``weather_stream`` to recover).
-- When the ``weather_stream`` recovered, the user defined ``recovery_callback`` was called.
-- The callback seeks the ``activity`` topic back to the offset before the ``weather_stream`` went down, causing the activity events that were sent out with stale data to be reprocessed
+- One faulty enrichment took place: ``The weather during shopping was ⛅`` before the ``activity`` stream was paused (waiting for the weather stream to recover)
+- When the weather stream recovered, the ``on_recovery`` callback was called
+- The callback seeks the ``activity`` topic back to the offset before the weather stream went down, causing the activity events that were sent out with stale data to be reprocessed
 - The faulty enrichment was corrected: ``The weather during shopping was 🌦️``
 
 Notice that when sending out corrections is required (using :py:class:`slipstream.Topic.seek` for example), data flows through the handler function again.
 This must be handled appropriately when dealing with stateful aggregations (prevent counting/summing an event twice).
 All consumers of the data must also be capable of dealing with corrections, by compacting/deduplicating the data by some key.
 
-Do not pause a wall-clock timer with ``pause_dependent=True``. Paused ticks are dropped, not queued, so a timeout latch can fire late or never. Prefer ``pause_dependent=False`` and skip the tick when ``check_pulse`` is truthy. Use :py:func:`slipstream.checkpointing.consumer_lag_downtime` and :py:func:`slipstream.checkpointing.consumer_lag_recovery` together when the dependency is a Kafka consumer that must be at the end of its assignment before the timer may emit. ``check_pulse`` re-runs recovery, so the next tick can resume without waiting for a later Kafka heartbeat.
-
-The first pulse still copies the dependent marker into a dependency that has never heartbeated. That is correct for event-time Kafka joins (so a silent leader is detected). It is the wrong seed if the dependent is a timer: wall-clock is written into the leader marker. Do not mix a timer dependent with the default datetime downtime check.
+A timer is handled differently: pausing it drops ticks instead of queueing them, so a timeout can fire late or never. When the dependent is a timer and every dependency is a Kafka topic, the checkpoint will not pause, and it waits until the consumer is at the end of the topic. Skip the tick when the checkpoint reports downtime.
 
 Endpoint
 ^^^^^^^^

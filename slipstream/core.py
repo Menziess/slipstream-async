@@ -12,7 +12,6 @@ from collections.abc import (
     Generator,
     Iterable,
 )
-from datetime import timedelta
 from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
@@ -217,7 +216,6 @@ class Conf(metaclass=Singleton):
     pubsub = PubSub()
     iterables: ClassVar[dict[str, PausableStream]] = {}
     pipes: ClassVar[dict[AsyncCallable, tuple[str, tuple[Pipe, ...]]]] = {}
-    markers: ClassVar[dict[str, Callable[[Any], Any]]] = {}
     exit_hooks: ClassVar[set[AsyncCallable]] = set()
 
     def __init__(self, conf: dict[str, Any] | None = None) -> None:
@@ -791,7 +789,11 @@ def _call_kwargs(
         for p in params
         if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
     }
-    return {k: v for k, v in kwargs.items() if k in named and k == 'downtime'}
+    return {
+        k: v
+        for k, v in kwargs.items()
+        if k in named and k in ('downtime', 'checkpoint')
+    }
 
 
 def _get_handler(
@@ -832,31 +834,10 @@ def _get_handler(
     return _handler
 
 
-def _unwrap_source(item: Any) -> Any:
-    """Use the source bound on a ``@handle`` wrapper when present."""
-    source = getattr(item, 'source', None)
-    if source is not None:
-        return source
-    return item
-
-
-def _as_dependencies(depends_on: Any) -> tuple[Any, ...]:
-    """Normalize ``depends_on`` without iterating a source."""
-    if not depends_on:
-        return ()
-    if isinstance(depends_on, list | tuple):
-        return tuple(_unwrap_source(item) for item in depends_on)
-    return (_unwrap_source(depends_on),)
-
-
 def handle(
     *iterable: AsyncIterable[Any],
     pipe: Iterable[Pipe] = [],
     sink: Iterable[Callable | AsyncCallable] = [],
-    depends_on: Any = (),
-    marker: Callable[[Any], Any] | str | None = None,
-    cache: ICache | None = None,
-    downtime_threshold: timedelta | None = None,
 ) -> Callable[[AsyncCallable], Handler]:
     """Bind sources and sinks to the handler function.
 
@@ -868,42 +849,33 @@ def handle(
         ... def handler(msg, **kwargs):
         ...     return msg.key, msg.value
 
-        >>> @handle(topic, depends_on=leader)  # doctest: +SKIP
-        ... def follower(msg, downtime=None):
+        >>> topic_checkpoint = Checkpoint(  # doctest: +SKIP
+        ...     topic, dependencies=leader, marker='timestamp'
+        ... )
+        >>> @handle(topic_checkpoint, sink=[print])  # doctest: +SKIP
+        ... def follower(msg, checkpoint=None):
         ...     yield msg.key, msg.value
     """
     c = Conf()
-    deps = _as_dependencies(depends_on)
 
     def _deco(f: AsyncCallable) -> Handler:
+        from slipstream.checkpointing import Checkpoint, bind_checkpoint
+
         handler: Any = _get_handler(f, sink)
         handler.checkpoint = None
-        resolved = None
-        if deps or marker is not None:
-            from slipstream.checkpointing import (
-                bind_handle_gate,
-                coerce_marker,
-            )
-
-            resolved = coerce_marker(marker)
-            if deps:
-                handler = bind_handle_gate(
-                    f,
-                    handler,
-                    iterable,
-                    deps,
-                    resolved,
-                    cache=cache,
-                    downtime_threshold=downtime_threshold,
-                )
-        handler.source = iterable[0] if iterable else None
-        handler.sources = iterable
+        sources: list[Any] = []
         for it in iterable:
-            iterable_key = str(id(it))
-            if resolved is not None:
-                c.markers[iterable_key] = resolved
-            c.register_iterable(iterable_key, it)
+            if isinstance(it, Checkpoint):
+                src = it.dependent
+                handler = bind_checkpoint(f, handler, it)
+            else:
+                src = it
+            sources.append(src)
+            iterable_key = str(id(src))
+            c.register_iterable(iterable_key, src)
             c.register_handler(iterable_key, handler, *pipe)
+        handler.source = sources[0] if sources else None
+        handler.sources = tuple(sources)
         return cast('Handler', handler)
 
     return _deco

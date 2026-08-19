@@ -30,7 +30,6 @@ def reset_singletons():
         conf = Conf()
         conf.iterables = {}  # type: ignore[attr-defined]
         conf.pipes = {}  # type: ignore[attr-defined]
-        conf.markers = {}  # type: ignore[attr-defined]
         conf.exit_hooks = set()  # type: ignore[attr-defined]
     Checkpoint._by_handler = {}
 
