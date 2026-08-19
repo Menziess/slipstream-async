@@ -215,12 +215,48 @@ You can define your own codecs using :py:class:`slipstream.interfaces.ICodec`, s
 Checkpoint
 ^^^^^^^^^^
 
-Checkpoints detect late data so a join does not emit against a stale table.
+Checkpoints can be used to detect late data:
 
-1. Example - `Downtime recovery <https://gist.github.com/Menziess/1a450d06851cbd00292b2a99c77cc854?permalink_comment_id=5459889#gistcomment-5459889>`_
-2. Example - `Downtime reprocessing <https://gist.github.com/Menziess/22d8a511f61c04a8142d81510a0db04b?permalink_comment_id=5468001#gistcomment-5468001>`_
+1. Example - `Downtime recovery <https://gist.github.com/Menziess/05cf7432cbed72e3a308075eb52869cf>`_
+2. Example - `Downtime reprocessing <https://gist.github.com/Menziess/e212727fdd87d3d1c9ea47ea8043476e>`_
 
-Declare the relationship on ``@handle``. The library heartbeats the leader, pulses the dependent, and pauses the dependent when event time falls behind (10 minutes by default):
+A checkpoint consists of one dependent, and many dependency streams:
+
+::
+
+    checkpoint = Checkpoint(
+        activity,
+        dependencies=[weather],
+        cache=checkpoints_cache,
+        downtime_threshold=timedelta(hours=1),
+        marker='timestamp',
+        on_recovery=lambda _c, d: activity.seek({
+            int(p): o for p, o in d.checkpoint_state.items()
+        }),
+    )
+
+- The first argument is the dependent stream
+- The ``dependencies`` argument is one stream or a list of streams (or ``Dependency`` objects)
+- The ``marker`` argument picks event time from each message
+- When ``weather`` (dependency) goes down, ``activity`` will be paused so ``weather`` can catch up
+
+Event times are compared as datetimes. Pass ``marker`` on the checkpoint; a leader that uses a different field sets it on ``Dependency``:
+
+::
+
+    checkpoint = Checkpoint(
+        activity,
+        dependencies=[
+            Dependency(
+                'weather',
+                weather,
+                marker='observed_at',
+            ),
+        ],
+        marker='event_time',
+    )
+
+Instead of the dependent stream, pass the checkpoint to ``handle``:
 
 ::
 
@@ -228,45 +264,29 @@ Declare the relationship on ``@handle``. The library heartbeats the leader, puls
     async def weather(msg):
         yield msg.timestamp, msg.value
 
-    @handle(activity, depends_on=weather, sink=[print])
-    async def activity(msg, downtime=None):
-        if downtime:
-            print(downtime)  # {'weather': timedelta(...)}
+    @handle(checkpoint, sink=[print])
+    async def activity(msg, checkpoint=None):
+        if checkpoint and checkpoint.downtime:
+            print(checkpoint.downtime)
         yield msg.key, msg.value
 
-``depends_on`` accepts a source or an already decorated handler. Event time is inferred from ``timestamp`` / ``event_timestamp`` (datetime or a common string), or from a Kafka record timestamp. Override with ``marker`` (a callable or field name). Persist with ``cache=``; change the lag with ``downtime_threshold=``.
+- Add ``checkpoint=None`` on ``activity`` and read ``checkpoint.downtime`` when weather is behind
+- The dependent stream is paused when a dependency is down or more than 10 minutes behind
 
-``downtime`` is ``None`` when every leader is healthy, otherwise a name → lag map (or ``True`` if still down but not over threshold this pulse). ``if downtime:`` means any leader is down. One leader still compares equal to its ``timedelta``, so existing ``downtime == timedelta(...)`` checks keep working.
+When the dependency stream recovers, it might have to process a backlog of messages. So the dependent stream will remain paused until the dependency stream has caught up.
 
-A timer that must not emit until a Topic has caught up is the same shape. The library then uses consumer-lag checks and does not pause ticks:
-
-::
-
-    @handle(timer(), depends_on=weather, sink=[print])
-    async def tick(_msg, downtime=None):
-        if downtime:
-            return
-
-Recovery (for example ``Topic.seek``) is still explicit:
+Rather than pausing ``activity``, leave it running:
 
 ::
 
-    activity.checkpoint.on_recovery(rewind)
+    checkpoint = Checkpoint(
+        activity,
+        dependencies=[weather],
+        marker='timestamp',
+        pause_dependent=False,
+    )
 
-You can still build :py:class:`slipstream.checkpointing.Checkpoint` and :py:class:`slipstream.checkpointing.Dependency` yourself when you need custom checks or callbacks at construction time.
+- Activity keeps flowing while weather is behind
+- Still read ``checkpoint.downtime`` if those messages need different handling
 
-When the dependency stream recovers, it might have to process a backlog. The dependent stays paused until the dependency has caught up.
-
-``heartbeat`` (when called manually) returns latency info:
-
-::
-
-    latency = await c.heartbeat(msg.value['event_timestamp'])
-    latency
-    .. {
-    ..     'is_late': True,
-    ..     'dependent_marker': datetime(2025, 1, 1, 10),
-    ..     'dependency_marker': datetime(2025, 1, 1, 9),
-    .. }
-
-``check_pulse`` returns that same name → check map (or ``None``). Topic dependents also store ``{partition: offset}`` so a recovery callback can seek.
+A full example is in :ref:`cookbook:synchronization`.

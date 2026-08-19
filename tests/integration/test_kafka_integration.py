@@ -113,16 +113,16 @@ async def test_checkpoint_reprocessing(kafka, timeout):
         await t.seek({int(p): o for p, o in offset.items()})
 
     c = Checkpoint(
-        'c',
         t,
-        [
-            Dependency(
-                'd',
-                iterable_to_async(weather_messages),
-                downtime_threshold=timedelta(hours=1),
-            ),
-        ],
-        recovery_callback=recovery_callback,
+        Dependency(
+            'd',
+            iterable_to_async(weather_messages),
+            downtime_threshold=timedelta(hours=1),
+            marker='timestamp',
+        ),
+        name='c',
+        marker='timestamp',
+        on_recovery=recovery_callback,
     )
 
     with timeout(seconds=5):
