@@ -144,6 +144,19 @@ async def test_heartbeat_single_dependency(checkpoint):
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_markers_do_not_rewind(checkpoint):
+    """Should ignore an earlier event time from another partition."""
+    later = datetime(2026, 8, 24, 16, 17, tzinfo=UTC)
+    earlier = datetime(2026, 8, 17, 23, 30, tzinfo=UTC)
+    await checkpoint.check_pulse(later, offset=1)
+    await checkpoint.heartbeat(later)
+    await checkpoint.check_pulse(earlier, offset=2)
+    await checkpoint.heartbeat(earlier)
+    assert checkpoint.state_marker == later
+    assert checkpoint['dependency'].checkpoint_marker == later
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_state_is_snapshot(checkpoint):
     """Should not mutate a saved checkpoint on later pulses."""
     first = datetime(2025, 1, 1, 10, tzinfo=UTC)

@@ -489,9 +489,13 @@ class Checkpoint:
             await awaitable(self._recovery_callback(self, dependency))
 
     def _save_state(self, state_marker: datetime | Any, **kwargs: Any) -> None:
-        """Save state of the stream (to cache)."""
+        """Save state of the stream (to cache).
+
+        Event-time markers only move forward so an out-of-order
+        partition cannot rewind the clock and pause the other source.
+        """
         self.state.update(**kwargs)
-        self.state_marker = state_marker
+        self.state_marker = _later_marker(self.state_marker, state_marker)
         if not self._cache:
             return
         self._cache[f'{self._cache_key}_{STATE_NAME}'] = self.state
@@ -505,9 +509,13 @@ class Checkpoint:
         checkpoint_state: Any,
         checkpoint_marker: datetime | Any,
     ) -> None:
-        """Save state of the dependency checkpoint (to cache)."""
+        """Save state of the dependency checkpoint (to cache).
+
+        Markers only move forward (see ``_save_state``).
+        """
+        marker = _later_marker(dependency.checkpoint_marker, checkpoint_marker)
         dependency.checkpoint_state = dict(checkpoint_state)
-        dependency.checkpoint_marker = checkpoint_marker
+        dependency.checkpoint_marker = marker
         if not self._cache:
             return
         dependency.save(
@@ -568,6 +576,16 @@ class Checkpoint:
                 },
             },
         )
+
+
+def _later_marker(old: Any, new: Any) -> Any:
+    """Keep the high-water marker; ignore incomparable types."""
+    if old is None:
+        return new
+    try:
+        return max(old, new)
+    except TypeError:
+        return new
 
 
 def _as_datetime(value: Any) -> datetime | None:
