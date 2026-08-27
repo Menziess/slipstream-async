@@ -236,18 +236,22 @@ A checkpoint consists of one dependent, and many dependency streams:
             weather,
             marker='timestamp',
         ),
+        on_downtime=lambda _c, _d: print('Activity paused'),
+        on_recovery=lambda _c, d: activity.seek({
+            int(p): o for p, o in d.checkpoint_state.items()
+        }),
         cache=checkpoints_cache,
         marker=lambda msg: datetime.fromisoformat(msg.value['timestamp']),
         state=lambda msg, state: state | {
             str(msg.partition): msg.offset
         },
-        on_recovery=lambda _c, d: activity.seek({
-            int(p): o for p, o in d.checkpoint_state.items()
-        }),
     )
 
 - The first argument is the dependent stream
 - The ``dependencies`` argument accepts a stream or ``Dependency``
+- The ``on_downtime`` callback runs when weather falls behind
+- The ``on_recovery`` callback seeks each Kafka partition to its stored offset
+- The ``cache`` argument persists checkpoint progress and recovery data
 - The ``marker`` normally returns a ``datetime`` from dependent messages
 - The ``state`` callable receives the message and current state, then returns caller-selected recovery data
 - When ``weather`` (dependency) goes down, ``activity`` will be paused so ``weather`` can catch up
