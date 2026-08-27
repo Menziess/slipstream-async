@@ -19,6 +19,25 @@ from slipstream.utils import AsyncCallable, awaitable
 _logger = logging.getLogger(__name__)
 
 
+def _validate_state_markers(
+    dependencies: list['Dependency'],
+    state: Callable[[Any, dict[str, Any]], dict[str, Any]] | None,
+    marker: Callable[..., Any] | str | None,
+) -> None:
+    """Require explicit dependency markers for a state-aware marker."""
+    if not state or not callable(marker):
+        return
+    missing = [
+        dependency.name for dependency in dependencies if not dependency.marker
+    ]
+    if missing:
+        err_msg = (
+            'Dependencies need their own marker when the checkpoint '
+            f'marker uses state: {missing}'
+        )
+        raise ValueError(err_msg)
+
+
 STATE_NAME = 'state'
 STATE_MARKER_NAME = 'state_marker'
 CHECKPOINT_STATE_NAME = 'checkpoint_state'
@@ -78,7 +97,8 @@ class Dependency:
         | None = None,
         recovery_check: AsyncCallable[['Checkpoint', 'Dependency'], bool]
         | None = None,
-        marker: Callable[[Any], Any] | str | None = None,
+        marker: Callable[..., Any] | str | None = None,
+        state: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         """Initialize dependency for checkpointing."""
         self.name = name
@@ -89,6 +109,7 @@ class Dependency:
         self._downtime_check = downtime_check or self._default_downtime_check
         self._recovery_check = recovery_check or self._default_recovery_check
         self.marker = marker
+        self.state_extractor = state
         self.is_down = False
 
     def uses_default_downtime_check(self) -> bool:
@@ -204,8 +225,8 @@ class Checkpoint:
         cache_key_prefix: str = '_',
         pause_dependent: bool | None = None,
         downtime_threshold: timedelta | None = None,
-        marker: Callable[[Any], Any] | str | None = None,
-        state: Callable[[Any], dict[str, Any]] | None = None,
+        marker: Callable[..., Any] | str | None = None,
+        state: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         """Create a checkpoint for ``dependent`` against its dependencies.
 
@@ -246,6 +267,7 @@ class Checkpoint:
         if id(self.dependent) in {id(d.dependency) for d in built}:
             err_msg = 'Checkpoint cannot depend on its dependent stream.'
             raise ValueError(err_msg)
+        _validate_state_markers(built, state, marker)
         self.pause_dependent = (
             True if pause_dependent is None else pause_dependent
         )
@@ -277,6 +299,7 @@ class Checkpoint:
         self,
         marker: datetime | Any,
         dependency_name: str | None = None,
+        checkpoint_state: Any = None,
     ) -> dict:
         """Update checkpoint to latest state.
 
@@ -285,6 +308,7 @@ class Checkpoint:
                 compared to the event timestamp of a dependent stream.
             dependency_name (str, optional): Required when there are multiple
                 dependencies to specify which one the heartbeat is for.
+            checkpoint_state: Complete caller-selected dependency state.
         """
         if dependency_name:
             if not (dependency := self.dependencies.get(dependency_name)):
@@ -299,7 +323,11 @@ class Checkpoint:
             )
             raise ValueError(err_msg)
 
-        self._save_checkpoint(dependency, self.state, marker)
+        self._save_checkpoint(
+            dependency,
+            self.state if checkpoint_state is None else checkpoint_state,
+            marker,
+        )
 
         if dependency.is_down:
             if await awaitable(dependency.recovery_check(self, dependency)):
@@ -315,6 +343,7 @@ class Checkpoint:
     async def check_pulse(
         self,
         marker: datetime | Any,
+        checkpoint_state: Any = None,
         **kwargs: Any,
     ) -> Any | None:
         """Update state that can be used as checkpoint.
@@ -322,6 +351,7 @@ class Checkpoint:
         Args:
             marker (datetime | Any): Typically the event timestamp that is
                 compared to the event timestamp of a dependency stream.
+            checkpoint_state: Complete caller-selected dependent state.
             kwargs (Any): Any information that can be used for reprocessing any
                 incorrect data that was sent out during downtime of a
                 dependency stream, stored in `state`.
@@ -332,7 +362,7 @@ class Checkpoint:
             down but not over threshold). One leader still compares
             equal to its timedelta / ``True``.
         """
-        self._save_state(marker, **kwargs)
+        self._save_state(marker, checkpoint_state, **kwargs)
 
         reported = Downtime()
         for dependency in self.dependencies.values():
@@ -406,13 +436,21 @@ class Checkpoint:
         if self._recovery_callback:
             await awaitable(self._recovery_callback(self, dependency))
 
-    def _save_state(self, state_marker: datetime | Any, **kwargs: Any) -> None:
+    def _save_state(
+        self,
+        state_marker: datetime | Any,
+        checkpoint_state: dict[str, Any] | None,
+        **kwargs: Any,
+    ) -> None:
         """Save state of the stream (to cache).
 
         Markers only move forward so another partition cannot rewind the
         checkpoint.
         """
-        self.state.update(**kwargs)
+        if checkpoint_state is None:
+            self.state.update(**kwargs)
+        else:
+            self.state = dict(checkpoint_state)
         self.state_marker = _later_marker(self.state_marker, state_marker)
         if not self._cache:
             return
@@ -512,13 +550,19 @@ def bind_checkpoint(
 
     @wraps(f)
     async def _pulsed(msg: Any, **kwargs: Any) -> Any:
+        state = (
+            checkpoint.state_extractor(msg, dict(checkpoint.state))
+            if checkpoint.state_extractor
+            else None
+        )
+        marker = (
+            checkpoint_marker(msg, state)
+            if checkpoint.state_extractor and callable(checkpoint_marker)
+            else _marker_value(checkpoint_marker, msg)
+        )
         downtime = await checkpoint.check_pulse(
-            _marker_value(checkpoint_marker, msg),
-            **(
-                checkpoint.state_extractor(msg)
-                if checkpoint.state_extractor
-                else {}
-            ),
+            marker,
+            checkpoint_state=state,
         )
         return await handler(
             msg,
@@ -537,10 +581,28 @@ def bind_checkpoint(
         async def _heartbeat(
             msg: Any,
             _name: str = dependency.name,
-            _marker: Callable[[Any], Any] | str = marker,
+            _dependency: Dependency = dependency,
+            _marker: Callable[..., Any] | str = marker,
             **_kwargs: Any,
         ) -> None:
-            await checkpoint.heartbeat(_marker_value(_marker, msg), _name)
+            state = (
+                _dependency.state_extractor(
+                    msg,
+                    dict(_dependency.checkpoint_state or {}),
+                )
+                if _dependency.state_extractor
+                else None
+            )
+            marker_value = (
+                _marker(msg, state)
+                if _dependency.state_extractor and callable(_marker)
+                else _marker_value(_marker, msg)
+            )
+            await checkpoint.heartbeat(
+                marker_value,
+                _name,
+                checkpoint_state=state,
+            )
 
         c.register_handler(key, _heartbeat)
 
