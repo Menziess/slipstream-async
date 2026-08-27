@@ -237,10 +237,10 @@ A checkpoint consists of one dependent, and many dependency streams:
 
 - The first argument is the dependent stream
 - The ``dependencies`` argument accepts a stream or ``Dependency``
-- The ``marker`` callable returns comparable values from dependent messages
+- The ``marker`` normally returns a ``datetime`` from dependent messages
 - When ``weather`` (dependency) goes down, ``activity`` will be paused so ``weather`` can catch up
 
-Marker conversion belongs to the caller. A leader that uses a different shape sets its own callable on ``Dependency``:
+Marker conversion belongs to the caller. The default checks subtract dependency markers from dependent markers and compare the difference with ``downtime_threshold``. A dependency that uses a different shape sets its own marker on ``Dependency``:
 
 ::
 

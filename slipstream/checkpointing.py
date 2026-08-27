@@ -165,18 +165,18 @@ class Checkpoint:
     ...         yield emoji
     >>> dependent, dependency = emoji(), emoji()
     >>> checkpoint = Checkpoint(
-    ...     'dependent',
     ...     dependent,
-    ...     [Dependency('dependency', dependency)],
+    ...     Dependency('dependency', dependency),
+    ...     name='dependent',
     ... )
 
     Pass a marker and bind the checkpoint to call ``heartbeat`` and
     ``check_pulse`` automatically:
 
     >>> checkpoint = Checkpoint(
-    ...     'dependent',
     ...     dependent,
-    ...     [Dependency('dependency', dependency, marker='timestamp')],
+    ...     Dependency('dependency', dependency, marker='timestamp'),
+    ...     name='dependent',
     ...     marker='timestamp',
     ... )
     >>> from slipstream import handle
@@ -235,6 +235,10 @@ class Checkpoint:
                         downtime_threshold=downtime_threshold,
                     )
                 )
+        names = [dependency.name for dependency in built]
+        if len(names) != len(set(names)):
+            err_msg = 'Dependency names must be unique.'
+            raise ValueError(err_msg)
         self.name = name or getattr(dependent, 'name', 'checkpoint')
         self.dependent = dependent
         self.dependencies = {d.name: d for d in built}
@@ -346,7 +350,7 @@ class Checkpoint:
             A truthy downtime value when this dependency is down.
         """
         if (
-            not dependency.checkpoint_marker
+            dependency.checkpoint_marker is None
             and dependency.uses_default_downtime_check()
         ):
             self._save_checkpoint(

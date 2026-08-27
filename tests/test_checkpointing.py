@@ -811,6 +811,41 @@ def test_checkpoint_named_dependencies():
     assert len(two.dependencies) == 2
 
 
+def test_checkpoint_rejects_duplicate_dependency_names():
+    """Should reject duplicate dependency names."""
+
+    async def msgs():
+        yield 1
+
+    with pytest.raises(ValueError, match='Dependency names must be unique'):
+        Checkpoint(
+            msgs(),
+            Dependency('weather', msgs()),
+            Dependency('weather', msgs()),
+            marker='timestamp',
+        )
+
+
+@pytest.mark.asyncio
+async def test_zero_dependency_marker_is_not_reseeded():
+    """Only None means that a dependency has no checkpoint marker."""
+    dependency = Dependency(
+        'offset',
+        iterable_to_async([]),
+        downtime_threshold=10,
+    )
+    dependency.checkpoint_marker = 0
+    checkpoint = Checkpoint(
+        iterable_to_async([]),
+        dependency,
+        marker='offset',
+    )
+
+    await checkpoint.check_pulse(5)
+
+    assert dependency.checkpoint_marker == 0
+
+
 def test_handle_without_checkpoint_source():
     """Should leave handlers without a Checkpoint unbound."""
 

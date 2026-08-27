@@ -1,7 +1,7 @@
 """Core tests."""
 
 import logging
-from asyncio import Event, gather, sleep
+from asyncio import Event, create_task, gather, sleep
 from collections.abc import AsyncIterable, AsyncIterator, Callable
 
 import pytest
@@ -549,10 +549,12 @@ async def test_topic_call(dry, mocker):
 async def test_topic_concurrent_calls_start_one_producer(mocker):
     """Should initialize one producer for concurrent calls."""
     topic = Topic('test')
+    entered = Event()
     release = Event()
     producer = mocker.AsyncMock(spec=AIOKafkaProducer)
 
     async def get_producer():
+        entered.set()
         await release.wait()
         return producer
 
@@ -561,8 +563,10 @@ async def test_topic_concurrent_calls_start_one_producer(mocker):
         'get_producer',
         side_effect=get_producer,
     )
-    first = topic('one', 'first')
-    second = topic('two', 'second')
+    first = create_task(topic('one', 'first'))
+    second = create_task(topic('two', 'second'))
+    await entered.wait()
+    await sleep(0)
     release.set()
 
     await gather(first, second)

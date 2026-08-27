@@ -382,7 +382,8 @@ Using :ref:`features:checkpoint` we can detect and act on stream downtimes, paus
     from asyncio import run, sleep
     from datetime import timedelta
 
-    from slipstream import Cache, Checkpoint, Dependency, Topic, handle, stream
+    from slipstream import Cache, Checkpoint, Topic, handle, stream
+    from slipstream.checkpointing import Dependency
     from slipstream.codecs import JsonCodec
     from slipstream.core import READ_FROM_END
 
