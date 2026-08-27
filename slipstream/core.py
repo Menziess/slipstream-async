@@ -15,7 +15,6 @@ from collections.abc import (
 from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
-    TYPE_CHECKING,
     Any,
     ClassVar,
     Literal,
@@ -59,16 +58,13 @@ PRODUCE_PAUSE_REASON = 'produce'
 
 _logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from slipstream.checkpointing import Checkpoint
-
 
 class Handler(Protocol):
     """Callable returned by ``@handle``."""
 
     source: Any
     sources: tuple[Any, ...]
-    checkpoint: 'Checkpoint | None'
+    checkpoint: Any
 
     async def __call__(self, msg: Any, **kwargs: Any) -> Any: ...
 
@@ -852,12 +848,6 @@ def handle(
         ... def handler(msg, **kwargs):
         ...     return msg.key, msg.value
 
-        >>> topic_checkpoint = Checkpoint(  # doctest: +SKIP
-        ...     topic, dependencies=leader, marker='timestamp'
-        ... )
-        >>> @handle(topic_checkpoint, sink=[print])  # doctest: +SKIP
-        ... def follower(msg, checkpoint=None):
-        ...     yield msg.key, msg.value
     """
     c = Conf()
 
@@ -867,15 +857,15 @@ def handle(
         handler: Any = _get_handler(f, sink)
         handler.checkpoint = None
         sources: list[Any] = []
-        for it in iterable:
-            if isinstance(it, Checkpoint):
-                src = it.dependent
-                handler = bind_checkpoint(f, handler, it)
+        for item in iterable:
+            if isinstance(item, Checkpoint):
+                source = item.dependent
+                handler = bind_checkpoint(f, handler, item)
             else:
-                src = it
-            sources.append(src)
-            iterable_key = str(id(src))
-            c.register_iterable(iterable_key, src)
+                source = item
+            sources.append(source)
+            iterable_key = str(id(source))
+            c.register_iterable(iterable_key, source)
             c.register_handler(iterable_key, handler, *pipe)
         handler.source = sources[0] if sources else None
         handler.sources = tuple(sources)
