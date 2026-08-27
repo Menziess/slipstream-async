@@ -236,19 +236,44 @@ A checkpoint consists of one dependent, and many dependency streams:
             weather,
             marker='timestamp',
         ),
-        cache=checkpoints_cache,
-        marker=lambda msg: datetime.fromisoformat(msg.value['timestamp']),
-        state=lambda msg: {str(msg.partition): msg.offset},
+        on_downtime=lambda _c, _d: print('Activity paused'),
         on_recovery=lambda _c, d: activity.seek({
             int(p): o for p, o in d.checkpoint_state.items()
         }),
+        cache=checkpoints_cache,
+        marker=lambda msg: datetime.fromisoformat(msg.value['timestamp']),
+        state=lambda msg, state: state | {
+            str(msg.partition): msg.offset
+        },
     )
 
 - The first argument is the dependent stream
 - The ``dependencies`` argument accepts a stream or ``Dependency``
+- The ``on_downtime`` callback runs when weather falls behind
+- The ``on_recovery`` callback seeks each Kafka partition to its stored offset
+- The ``cache`` argument persists checkpoint progress and recovery data
 - The ``marker`` normally returns a ``datetime`` from dependent messages
-- The ``state`` callable returns caller-selected recovery data
+- The ``state`` callable receives the message and current state, then returns caller-selected recovery data
 - When ``weather`` (dependency) goes down, ``activity`` will be paused so ``weather`` can catch up
+
+The ``state`` callable always receives two arguments: the message and a copy of the current state. It returns the complete next state, so it can merge, replace, or remove entries. A callable ``marker`` receives the message and that next state. This keeps checkpointing agnostic to the state shape while allowing applications to derive comparison markers:
+
+::
+
+    checkpoint = Checkpoint(
+        activity,
+        dependencies=Dependency(
+            'weather',
+            weather,
+            marker=lambda msg: msg.value['timestamp'],
+        ),
+        state=lambda msg, state: state | {
+            str(msg.partition): msg.value['timestamp'],
+        },
+        marker=lambda _msg, state: min(state.values()),
+    )
+
+``Dependency`` accepts the same ``state`` and state-aware ``marker`` callables when its marker also depends on accumulated state.
 
 Marker conversion belongs to the caller. The default checks subtract dependency markers from dependent markers and compare the difference with ``downtime_threshold``. A dependency that uses a different shape sets its own marker on ``Dependency``:
 

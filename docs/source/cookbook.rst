@@ -427,7 +427,9 @@ The ``Checkpoint`` defines the relationship between streams:
             msg.value['timestamp'],
             '%Y-%m-%d %H:%M:%S',
         ),
-        state=lambda msg: {str(msg.partition): msg.offset},
+        state=lambda msg, state: state | {
+            str(msg.partition): msg.offset
+        },
         on_downtime=lambda _c, _d: print('\tThe stream is automatically paused.'),
         on_recovery=lambda _c, d: print(
             '\tDowntime resolved, '
@@ -484,7 +486,7 @@ Breakdown:
 
 - Each weather message updates the checkpoint with the weather event time
 - Each activity message checks the pulse of its dependencies
-- The ``state`` callable selects the Kafka offsets stored for recovery
+- The ``state`` callable receives each message and current state, then returns the Kafka offsets stored for recovery
 
 ::
 

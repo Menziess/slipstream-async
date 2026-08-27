@@ -98,7 +98,7 @@ async def test_handle_stores_configured_checkpoint_state():
             activity_stream,
             weather_stream,
             marker='timestamp',
-            state=lambda msg: {'cursor': msg['cursor']},
+            state=lambda msg, state: state | {'cursor': msg['cursor']},
         )
     )
     def activity_handler(msg):
@@ -108,6 +108,121 @@ async def test_handle_stores_configured_checkpoint_state():
 
     checkpoint = Checkpoint.for_handler(activity_handler)
     assert checkpoint.state == {'cursor': 'page-7'}
+
+
+@pytest.mark.asyncio
+async def test_handle_derives_watermark_from_merged_state():
+    """Should derive the marker after merging extracted and persisted state."""
+    start = datetime(2025, 1, 1, 10, tzinfo=UTC)
+
+    async def weather():
+        yield {'timestamp': start}
+
+    async def activity():
+        yield {'partition': '1', 'timestamp': start + timedelta(minutes=2)}
+
+    weather_stream, activity_stream = weather(), activity()
+    checkpoint = Checkpoint(
+        activity_stream,
+        Dependency('weather', weather_stream, marker='timestamp'),
+        marker=lambda _msg, state: min(state.values()),
+        state=lambda msg, state: state | {msg['partition']: msg['timestamp']},
+    )
+    checkpoint.state = {'0': start + timedelta(minutes=1)}
+
+    @handle(weather_stream)
+    def weather_handler(msg):
+        return msg
+
+    @handle(checkpoint)
+    def activity_handler(msg):
+        return msg
+
+    await stream()
+
+    assert checkpoint.state == {
+        '0': start + timedelta(minutes=1),
+        '1': start + timedelta(minutes=2),
+    }
+    assert checkpoint.state_marker == start + timedelta(minutes=1)
+
+
+@pytest.mark.asyncio
+async def test_handle_state_can_remove_entries():
+    """Should let the caller replace state and remove stale entries."""
+
+    async def activity():
+        yield {'active': '1'}
+
+    checkpoint = Checkpoint(
+        activity(),
+        marker=lambda _msg, state: min(state.values()),
+        state=lambda msg, state: {
+            key: value for key, value in state.items() if key == msg['active']
+        },
+    )
+    checkpoint.state = {'0': 10, '1': 20}
+
+    @handle(checkpoint)
+    def activity_handler(msg):
+        return msg
+
+    await stream()
+
+    assert checkpoint.state == {'1': 20}
+    assert checkpoint.state_marker == 20
+
+
+def test_state_aware_marker_requires_dependency_marker():
+    """Should reject ambiguous dependency fallback marker invocation."""
+    with pytest.raises(ValueError, match='need their own marker'):
+        Checkpoint(
+            iterable_to_async([]),
+            iterable_to_async([]),
+            marker=lambda _msg, state: min(state.values()),
+            state=lambda _msg, state: state,
+        )
+
+
+@pytest.mark.asyncio
+async def test_dependency_derives_marker_from_its_state():
+    """Should let a dependency own and replace its state."""
+    start = datetime(2025, 1, 1, 10, tzinfo=UTC)
+
+    async def weather():
+        yield {'active': '1', 'timestamp': start}
+
+    async def activity():
+        yield {'timestamp': start}
+
+    weather_stream, activity_stream = weather(), activity()
+    dependency = Dependency(
+        'weather',
+        weather_stream,
+        marker=lambda _msg, state: min(state.values()),
+        state=lambda msg, state: {
+            key: value for key, value in state.items() if key == msg['active']
+        },
+    )
+    dependency.checkpoint_state = {'0': start, '1': start}
+    checkpoint = Checkpoint(
+        activity_stream,
+        dependency,
+        marker='timestamp',
+    )
+
+    @handle(weather_stream)
+    def weather_handler(msg):
+        return msg
+
+    @handle(checkpoint)
+    def activity_handler(msg):
+        return msg
+
+    await stream()
+
+    assert dependency.checkpoint_state == {'1': start}
+    assert dependency.checkpoint_marker == start
 
 
 @pytest.mark.asyncio
