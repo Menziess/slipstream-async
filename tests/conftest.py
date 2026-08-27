@@ -66,10 +66,14 @@ def timeout():
             err_msg = f'Timeout reached: {seconds}.'
             raise TimeoutError(err_msg)
 
-        signal.signal(signal.SIGALRM, raise_timeout)
+        previous = signal.signal(signal.SIGALRM, raise_timeout)
         signal.alarm(seconds)
 
-        yield
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
 
     return set_timeout
 
