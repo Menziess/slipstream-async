@@ -144,6 +144,18 @@ async def test_heartbeat_single_dependency(checkpoint):
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_state_is_snapshot(checkpoint):
+    """Should not mutate a saved checkpoint on later pulses."""
+    first = datetime(2025, 1, 1, 10, tzinfo=UTC)
+    await checkpoint.check_pulse(first, offset=0)
+    await checkpoint.heartbeat(first)
+
+    await checkpoint.check_pulse(first + timedelta(minutes=1), offset=1)
+
+    assert checkpoint['dependency'].checkpoint_state == {'offset': 0}
+
+
+@pytest.mark.asyncio
 async def test_heartbeat_multiple_dependencies_error(checkpoint):
     """Should warn about missing argument."""
     checkpoint.dependencies['extra'] = Dependency(

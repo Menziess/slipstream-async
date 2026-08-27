@@ -449,7 +449,7 @@ class Checkpoint:
                 log_msg = (
                     f'Downtime of dependency "{dependency.name}" detected'
                 )
-                _logger.debug(log_msg)
+                _logger.info(log_msg)
                 await self._pause_dependent()
                 self._awaiting_resume = True
                 if self._downtime_callback:
@@ -506,14 +506,14 @@ class Checkpoint:
         checkpoint_marker: datetime | Any,
     ) -> None:
         """Save state of the dependency checkpoint (to cache)."""
-        dependency.checkpoint_state = checkpoint_state
+        dependency.checkpoint_state = dict(checkpoint_state)
         dependency.checkpoint_marker = checkpoint_marker
         if not self._cache:
             return
         dependency.save(
             self._cache,
             self._cache_key,
-            checkpoint_state,
+            dependency.checkpoint_state,
             checkpoint_marker,
         )
 

@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import Event, gather, sleep, wait_for
+from asyncio import Event, Lock, gather, sleep, wait_for
 from collections.abc import (
     AsyncGenerator,
     AsyncIterable,
@@ -416,6 +416,7 @@ if aiokafka_available:
 
             self.consumer: AIOKafkaConsumer | None = None
             self.producer: AIOKafkaProducer | None = None
+            self._producer_lock = Lock()
             self._generator: (
                 AsyncGenerator[
                     Literal[Signal.SENTINEL] | ConsumerRecord[Any, Any],
@@ -569,7 +570,9 @@ if aiokafka_available:
                 _logger.warning(err_msg)
                 return
             if not self.producer:
-                self.producer = await self.get_producer()
+                async with self._producer_lock:
+                    if not self.producer:
+                        self.producer = await self.get_producer()
             await self._send_with_retry(key, value, headers_list, **kwargs)
 
         async def _send_with_retry(
@@ -656,11 +659,11 @@ if aiokafka_available:
 
                     if signal is Signal.PAUSE:
                         consumer.pause(*consumer.assignment())
-                        _logger.debug(f'{self.name} paused')
+                        _logger.info(f'{self.name} paused')
                         while True:
                             signal = yield Signal.SENTINEL
                             if signal is Signal.RESUME:
-                                _logger.debug(f'{self.name} reactivated')
+                                _logger.info(f'{self.name} reactivated')
                                 consumer.resume(*consumer.assignment())
                                 break
                             await sleep(3)

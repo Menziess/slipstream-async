@@ -524,8 +524,8 @@ This streaming endpoint emits cache updates:
 
     async def timer(interval=1.0):
         while True:
-            yield
             await sleep(interval)
+            yield
 
     @handle(timer(), sink=[cache, print])
     def tick_tock():
