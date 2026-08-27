@@ -74,6 +74,43 @@ def test_dependency_save_and_load(mock_cache, dependency):
 
 
 @pytest.mark.asyncio
+async def test_handle_stores_configured_checkpoint_state():
+    """Should store caller-selected state during automatic pulse checks."""
+
+    async def weather():
+        yield {'timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC)}
+
+    async def activity():
+        await sleep(0.05)
+        yield {
+            'timestamp': datetime(2025, 1, 1, 10, 5, tzinfo=UTC),
+            'cursor': 'page-7',
+        }
+
+    weather_stream, activity_stream = weather(), activity()
+
+    @handle(weather_stream)
+    def weather_handler(msg):
+        return msg
+
+    @handle(
+        Checkpoint(
+            activity_stream,
+            weather_stream,
+            marker='timestamp',
+            state=lambda msg: {'cursor': msg['cursor']},
+        )
+    )
+    def activity_handler(msg):
+        return msg
+
+    await stream()
+
+    checkpoint = Checkpoint.for_handler(activity_handler)
+    assert checkpoint.state == {'cursor': 'page-7'}
+
+
+@pytest.mark.asyncio
 async def test_default_downtime_check(dependency):
     """Should check for datetime diff surpassing threshold."""
     checkpoint = Checkpoint(

@@ -205,6 +205,7 @@ class Checkpoint:
         pause_dependent: bool | None = None,
         downtime_threshold: timedelta | None = None,
         marker: Callable[[Any], Any] | str | None = None,
+        state: Callable[[Any], dict[str, Any]] | None = None,
     ) -> None:
         """Create a checkpoint for ``dependent`` against its dependencies.
 
@@ -249,6 +250,7 @@ class Checkpoint:
             True if pause_dependent is None else pause_dependent
         )
         self.marker = marker
+        self.state_extractor = state
         self.downtime: Any | None = None
         self._cache = cache
         self._cache_key = f'{cache_key_prefix}_{self.name}_'
@@ -511,7 +513,12 @@ def bind_checkpoint(
     @wraps(f)
     async def _pulsed(msg: Any, **kwargs: Any) -> Any:
         downtime = await checkpoint.check_pulse(
-            _marker_value(checkpoint_marker, msg)
+            _marker_value(checkpoint_marker, msg),
+            **(
+                checkpoint.state_extractor(msg)
+                if checkpoint.state_extractor
+                else {}
+            ),
         )
         return await handler(
             msg,

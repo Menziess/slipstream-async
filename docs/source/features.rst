@@ -238,11 +238,16 @@ A checkpoint consists of one dependent, and many dependency streams:
         ),
         cache=checkpoints_cache,
         marker=lambda msg: datetime.fromisoformat(msg.value['timestamp']),
+        state=lambda msg: {str(msg.partition): msg.offset},
+        on_recovery=lambda _c, d: activity.seek({
+            int(p): o for p, o in d.checkpoint_state.items()
+        }),
     )
 
 - The first argument is the dependent stream
 - The ``dependencies`` argument accepts a stream or ``Dependency``
 - The ``marker`` normally returns a ``datetime`` from dependent messages
+- The ``state`` callable returns caller-selected recovery data
 - When ``weather`` (dependency) goes down, ``activity`` will be paused so ``weather`` can catch up
 
 Marker conversion belongs to the caller. The default checks subtract dependency markers from dependent markers and compare the difference with ``downtime_threshold``. A dependency that uses a different shape sets its own marker on ``Dependency``:

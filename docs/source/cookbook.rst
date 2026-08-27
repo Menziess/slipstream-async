@@ -423,6 +423,11 @@ The ``Checkpoint`` defines the relationship between streams:
             ),
         ],
         cache=checkpoints_cache,
+        marker=lambda msg: dt.strptime(
+            msg.value['timestamp'],
+            '%Y-%m-%d %H:%M:%S',
+        ),
+        state=lambda msg: {str(msg.partition): msg.offset},
         on_downtime=lambda _c, _d: print('\tThe stream is automatically paused.'),
         on_recovery=lambda _c, d: print(
             '\tDowntime resolved, '
@@ -444,7 +449,6 @@ In the ``handle_weather`` handler we will "kill" the stream for 5 seconds:
     @handle(weather_stream, sink=[weather_cache, print])
     async def handle_weather(w):
         """Process weather message."""
-        await activity_cp.heartbeat(w['timestamp'])
         yield w['timestamp'].timestamp(), w
         if w['value'] == '⛅':
             print('\tKilling weather stream on purpose')
@@ -456,17 +460,13 @@ In the ``handle_weather`` handler we will "kill" the stream for 5 seconds:
         """Send data to activity topic."""
         yield None, val
 
-    @handle(activity, sink=[print])
-    async def handle_activity(msg):
+    @handle(activity_cp, sink=[print])
+    async def handle_activity(msg, checkpoint=None):
         """Process activity message."""
         a = msg.value
         ts = dt.strptime(a['timestamp'], '%Y-%m-%d %H:%M:%S')
-        downtime = await activity_cp.check_pulse(
-            ts,
-            **{str(msg.partition): msg.offset},
-        )
-        if downtime:
-            lag = next(iter(downtime.values()))
+        if checkpoint and checkpoint.downtime:
+            lag = next(iter(checkpoint.downtime.values()))
             print(
                 f'\tDowntime detected: {lag}, '
                 '(could cause faulty enrichment)'
@@ -484,7 +484,7 @@ Breakdown:
 
 - Each weather message updates the checkpoint with the weather event time
 - Each activity message checks the pulse of its dependencies
-- The handler stores Kafka offsets by passing them to ``check_pulse``
+- The ``state`` callable selects the Kafka offsets stored for recovery
 
 ::
 
