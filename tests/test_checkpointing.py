@@ -9,12 +9,8 @@ from conftest import emoji, iterable_to_async
 from slipstream.checkpointing import (
     Checkpoint,
     Dependency,
-    coerce_marker,
-    consumer_at_end,
-    consumer_lag_downtime,
-    consumer_lag_recovery,
 )
-from slipstream.core import Conf, Signal, Topic, handle, stream
+from slipstream.core import Conf, Signal, handle, stream
 
 UTC = timezone.utc
 
@@ -89,7 +85,7 @@ async def test_default_downtime_check(dependency):
 
     checkpoint.state_marker = 'not-datetime'
     dependency.checkpoint_marker = 'not-datetime'
-    with pytest.raises(TypeError, match='Expecting either `datetime`'):
+    with pytest.raises(TypeError):
         dependency._default_downtime_check(checkpoint, dependency)
 
     checkpoint.state_marker = datetime(2025, 1, 1, 11, tzinfo=UTC)
@@ -111,8 +107,7 @@ async def test_default_recovery_check(dependency):
 
     checkpoint.state_marker = 'not-datetime'
     dependency.checkpoint_marker = 'not-datetime'
-    with pytest.raises(TypeError, match='Expecting either `datetime`'):
-        dependency._default_recovery_check(checkpoint, dependency)
+    assert not dependency._default_recovery_check(checkpoint, dependency)
 
     checkpoint.state_marker = datetime(2025, 1, 1, 10, tzinfo=UTC)
     dependency.checkpoint_marker = datetime(2025, 1, 1, 11, tzinfo=UTC)
@@ -141,6 +136,31 @@ async def test_heartbeat_single_dependency(checkpoint):
     dep = checkpoint['dependency']
     assert dep.checkpoint_marker == marker
     assert dep.checkpoint_state == checkpoint.state
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_markers_do_not_rewind(checkpoint):
+    """Should ignore an earlier marker from another partition."""
+    later = datetime(2026, 8, 24, 16, 17, tzinfo=UTC)
+    earlier = datetime(2026, 8, 17, 23, 30, tzinfo=UTC)
+    await checkpoint.check_pulse(later, offset=1)
+    await checkpoint.heartbeat(later)
+    await checkpoint.check_pulse(earlier, offset=2)
+    await checkpoint.heartbeat(earlier)
+    assert checkpoint.state_marker == later
+    assert checkpoint['dependency'].checkpoint_marker == later
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_state_is_snapshot(checkpoint):
+    """Should not mutate a saved checkpoint on later pulses."""
+    first = datetime(2025, 1, 1, 10, tzinfo=UTC)
+    await checkpoint.check_pulse(first, offset=0)
+    await checkpoint.heartbeat(first)
+
+    await checkpoint.check_pulse(first + timedelta(minutes=1), offset=1)
+
+    assert checkpoint['dependency'].checkpoint_state == {'offset': 0}
 
 
 @pytest.mark.asyncio
@@ -437,92 +457,6 @@ async def test_check_pulse_recovers_without_heartbeat(mock_cache, mocker):
 
 
 @pytest.mark.asyncio
-async def test_consumer_at_end_no_consumer():
-    """Missing consumer is not ready."""
-    assert await consumer_at_end(None) is None
-
-
-@pytest.mark.asyncio
-async def test_consumer_at_end_empty_assignment(mocker):
-    """Unassigned consumer is not ready."""
-    consumer = mocker.MagicMock()
-    consumer.assignment.return_value = set()
-    assert await consumer_at_end(consumer) is None
-
-
-@pytest.mark.asyncio
-async def test_consumer_at_end_probe_error(mocker):
-    """Assignment probe failure is not ready."""
-    consumer = mocker.MagicMock()
-    consumer.assignment.side_effect = AttributeError('no assignment')
-    assert await consumer_at_end(consumer) is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ('position', 'expected'),
-    [(0, False), (1, True), (2, True)],
-)
-async def test_consumer_at_end_positions(position, expected, mocker):
-    """Caught up when every assigned position is at or past the snapshot."""
-    part = object()
-    consumer = mocker.MagicMock()
-    consumer.assignment.return_value = {part}
-    consumer.end_offsets = mocker.AsyncMock(return_value={part: 1})
-    consumer.position = mocker.AsyncMock(return_value=position)
-    assert await consumer_at_end(consumer) is expected
-
-
-@pytest.mark.asyncio
-async def test_consumer_lag_checks_require_confirmed_end(mocker):
-    """Lag checks treat anything but a confirmed end as down."""
-    topic = mocker.MagicMock()
-    topic.consumer = None
-    dependency = Dependency('dep', topic)
-    checkpoint = Checkpoint(
-        iterable_to_async([]),
-        dependency,
-        name='test',
-        marker='timestamp',
-    )
-
-    assert await consumer_lag_downtime(checkpoint, dependency) == timedelta(
-        seconds=1
-    )
-    assert await consumer_lag_recovery(checkpoint, dependency) is False
-
-    part = object()
-    consumer = mocker.MagicMock()
-    consumer.assignment.return_value = {part}
-    consumer.end_offsets = mocker.AsyncMock(return_value={part: 1})
-    consumer.position = mocker.AsyncMock(return_value=1)
-    topic.consumer = consumer
-
-    assert await consumer_lag_downtime(checkpoint, dependency) is None
-    assert await consumer_lag_recovery(checkpoint, dependency) is True
-
-
-@pytest.mark.asyncio
-async def test_consumer_lag_checks_accept_raw_consumer(mocker):
-    """A raw consumer (no .consumer wrapper) is still probed."""
-    part = object()
-    consumer = mocker.Mock(spec=['assignment', 'end_offsets', 'position'])
-    consumer.assignment.return_value = {part}
-    consumer.end_offsets = mocker.AsyncMock(return_value={part: 1})
-    consumer.position = mocker.AsyncMock(return_value=1)
-    dependency = Dependency('dep', consumer)
-    checkpoint = Checkpoint(
-        iterable_to_async([]),
-        dependency,
-        name='test',
-        marker='timestamp',
-    )
-
-    assert await consumer_lag_downtime(checkpoint, dependency) is None
-    assert await consumer_lag_recovery(checkpoint, dependency) is True
-
-
-@pytest.mark.asyncio
 async def test_check_pulse_two_deps_one_recovers_stays_paused(
     mock_cache, mocker
 ):
@@ -696,23 +630,6 @@ async def test_resume_callback_fires_once_on_overlap(mock_cache):
     assert calls == ['dependency']
 
 
-def test_coerce_marker_prefers_payload_timestamp():
-    """Should treat marker='timestamp' as the payload field on a record."""
-    event = datetime(2025, 1, 1, 10, tzinfo=UTC)
-    pick = coerce_marker('timestamp')
-    assert pick is not None
-    rec = type(
-        'Rec',
-        (),
-        {
-            'timestamp': 1_700_000_000_000,
-            'partition': 0,
-            'value': {'timestamp': event},
-        },
-    )()
-    assert pick(rec) == event
-
-
 def test_for_handler_without_checkpoint():
     """Should raise when no Checkpoint was bound to the handler."""
 
@@ -864,34 +781,6 @@ async def test_handle_depends_on_recovery_callback():
 
 
 @pytest.mark.asyncio
-async def test_handle_timer_depends_on_topic_uses_lag():
-    """Should use consumer-lag checks and not pause a non-Topic dependent."""
-    topic = Topic('weather', {'bootstrap_servers': 'localhost:9092'})
-
-    async def ticks():
-        yield 1
-
-    ticks_s = ticks()
-
-    @handle(
-        Checkpoint(
-            ticks_s,
-            topic,
-            marker=lambda _msg: datetime(2025, 1, 1, tzinfo=UTC),
-        )
-    )
-    def tick(_msg):
-        return None
-
-    c = Checkpoint.for_handler(tick)
-    assert c.pause_dependent is False
-    assert 'weather' in c.dependencies
-    dep = c['weather']
-    assert dep.downtime_check is consumer_lag_downtime
-    assert dep.recovery_check is consumer_lag_recovery
-
-
-@pytest.mark.asyncio
 async def test_handle_depends_on_rejects_self():
     """Should reject a source that depends on itself."""
 
@@ -922,6 +811,41 @@ def test_checkpoint_named_dependencies():
     assert len(two.dependencies) == 2
 
 
+def test_checkpoint_rejects_duplicate_dependency_names():
+    """Should reject duplicate dependency names."""
+
+    async def msgs():
+        yield 1
+
+    with pytest.raises(ValueError, match='Dependency names must be unique'):
+        Checkpoint(
+            msgs(),
+            Dependency('weather', msgs()),
+            Dependency('weather', msgs()),
+            marker='timestamp',
+        )
+
+
+@pytest.mark.asyncio
+async def test_zero_dependency_marker_is_not_reseeded():
+    """Only None means that a dependency has no checkpoint marker."""
+    dependency = Dependency(
+        'offset',
+        iterable_to_async([]),
+        downtime_threshold=10,
+    )
+    dependency.checkpoint_marker = 0
+    checkpoint = Checkpoint(
+        iterable_to_async([]),
+        dependency,
+        marker='offset',
+    )
+
+    await checkpoint.check_pulse(5)
+
+    assert dependency.checkpoint_marker == 0
+
+
 def test_handle_without_checkpoint_source():
     """Should leave handlers without a Checkpoint unbound."""
 
@@ -938,7 +862,7 @@ def test_handle_without_checkpoint_source():
 
 @pytest.mark.asyncio
 async def test_check_pulse_skips_seed_for_custom_check(mock_cache):
-    """Should not copy the dependent clock into a lag-style dependency."""
+    """Should leave initial state to a custom downtime policy."""
 
     def never_datetime(_c, _d):
         return None
@@ -959,25 +883,6 @@ async def test_check_pulse_skips_seed_for_custom_check(mock_cache):
     )
     await checkpoint.check_pulse(datetime(2025, 1, 1, 11, tzinfo=UTC))
     assert dependency.checkpoint_marker is None
-
-
-def test_coerce_marker_field_name():
-    """Should look up a named field on dicts and record payloads."""
-    pick = coerce_marker('event_time')
-    assert pick is not None
-    ts = datetime(2025, 1, 1, 10, tzinfo=UTC)
-    assert pick({'event_time': ts}) == ts
-
-    rec = type('Rec', (), {'value': {'event_time': ts}})()
-    assert pick(rec) == ts
-    compact = coerce_marker('timestamp')
-    assert compact({'timestamp': '20230101T100000Z'}) == datetime(
-        2023, 1, 1, 10, tzinfo=UTC
-    )
-    with pytest.raises(KeyError, match='not found'):
-        pick({})
-    with pytest.raises(TypeError, match='callable or field name'):
-        coerce_marker(1)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio

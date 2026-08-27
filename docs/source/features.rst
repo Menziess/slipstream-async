@@ -224,23 +224,28 @@ A checkpoint consists of one dependent, and many dependency streams:
 
 ::
 
+    from datetime import datetime
+
+    from slipstream import Checkpoint
+    from slipstream.checkpointing import Dependency
+
     checkpoint = Checkpoint(
         activity,
-        dependencies=[weather],
+        dependencies=Dependency(
+            'weather',
+            weather,
+            marker='timestamp',
+        ),
         cache=checkpoints_cache,
-        downtime_threshold=timedelta(hours=1),
-        marker='timestamp',
-        on_recovery=lambda _c, d: activity.seek({
-            int(p): o for p, o in d.checkpoint_state.items()
-        }),
+        marker=lambda msg: datetime.fromisoformat(msg.value['timestamp']),
     )
 
 - The first argument is the dependent stream
-- The ``dependencies`` argument is one stream or a list of streams (or ``Dependency`` objects)
-- The ``marker`` argument picks event time from each message
+- The ``dependencies`` argument accepts a stream or ``Dependency``
+- The ``marker`` normally returns a ``datetime`` from dependent messages
 - When ``weather`` (dependency) goes down, ``activity`` will be paused so ``weather`` can catch up
 
-Event times are compared as datetimes. Pass ``marker`` on the checkpoint; a leader that uses a different field sets it on ``Dependency``:
+Marker conversion belongs to the caller. The default checks subtract dependency markers from dependent markers and compare the difference with ``downtime_threshold``. A dependency that uses a different shape sets its own marker on ``Dependency``:
 
 ::
 
@@ -253,7 +258,7 @@ Event times are compared as datetimes. Pass ``marker`` on the checkpoint; a lead
                 marker='observed_at',
             ),
         ],
-        marker='event_time',
+        marker=lambda msg: datetime.fromisoformat(msg.value['event_time']),
     )
 
 Instead of the dependent stream, pass the checkpoint to ``handle``:
@@ -282,7 +287,7 @@ Rather than pausing ``activity``, leave it running:
     checkpoint = Checkpoint(
         activity,
         dependencies=[weather],
-        marker='timestamp',
+        marker=lambda msg: datetime.fromisoformat(msg.value['timestamp']),
         pause_dependent=False,
     )
 
