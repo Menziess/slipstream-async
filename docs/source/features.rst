@@ -224,6 +224,11 @@ A checkpoint consists of one dependent, and many dependency streams:
 
 ::
 
+    from datetime import datetime
+
+    from slipstream import Checkpoint
+    from slipstream.checkpointing import Dependency
+
     checkpoint = Checkpoint(
         activity,
         dependencies=Dependency(
