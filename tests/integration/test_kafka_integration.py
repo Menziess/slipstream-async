@@ -160,3 +160,30 @@ async def test_checkpoint_reprocessing(kafka, timeout):
         # ('🌧', 'lunch')
         assert await next_activity() == (None, 'shopping')
         assert await next_activity() == (None, 'lunch')
+
+
+@pytest.mark.asyncio
+async def test_topic_pause_poll_keeps_group_and_offset(kafka, timeout):
+    """Should stay in the group while paused and not skip records."""
+    t = Topic(
+        'test_pause_poll_group',
+        {
+            'bootstrap_servers': kafka,
+            'auto_offset_reset': 'earliest',
+            'group_id': 'test_pause_poll_group',
+            'group_instance_id': 'test_pause_poll_group',
+            'enable_auto_commit': False,
+            'max_poll_interval_ms': 10000,
+            'session_timeout_ms': 6000,
+            'heartbeat_interval_ms': 2000,
+        },
+    )
+    await t(b'k', b'a')
+    await t(b'k', b'b')
+    await t(b'k', b'c')
+    with timeout(seconds=40):
+        assert (await t.asend(None)).value == 'a'
+        for _ in range(5):
+            assert await t.asend(Signal.PAUSE) is Signal.SENTINEL
+        assert (await t.asend(Signal.RESUME)).value == 'b'
+        assert (await t.asend(None)).value == 'c'

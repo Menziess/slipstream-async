@@ -345,7 +345,7 @@ if aiokafka_available:
         ConsumerRecord,
         TopicPartition,
     )
-    from aiokafka.errors import KafkaTimeoutError
+    from aiokafka.errors import KafkaError, KafkaTimeoutError
     from aiokafka.helpers import create_ssl_context
 
     def is_retriable_produce_error(exc: BaseException) -> bool:
@@ -662,7 +662,17 @@ if aiokafka_available:
                                 _logger.info(f'{self.name} reactivated')
                                 consumer.resume(*consumer.assignment())
                                 break
-                            await sleep(3)
+                            try:
+                                await consumer.getmany(timeout_ms=3000)
+                            except KafkaError as e:
+                                if not getattr(e, 'retriable', False):
+                                    raise
+                                _logger.warning(
+                                    '%s pause poll failed; retrying',
+                                    self.name,
+                                    exc_info=True,
+                                )
+                                await sleep(3)
 
             except Exception as e:
                 err_msg = (

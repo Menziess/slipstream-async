@@ -12,9 +12,11 @@ from aiokafka import (
     TopicPartition,
 )
 from aiokafka.errors import (
+    KafkaConnectionError,
     KafkaTimeoutError,
     NotEnoughReplicasError,
     RequestTimedOutError,
+    TopicAuthorizationFailedError,
 )
 from conftest import emoji
 from pytest_mock import MockerFixture
@@ -640,6 +642,52 @@ async def test_topic_pause(mocker):
     msg = await t.asend(Signal.RESUME)
     assert msg.key == 'key'
     assert msg.value == 'val'
+    assert c.getmany.await_args.kwargs['timeout_ms'] == 3000
+
+
+@pytest.mark.asyncio
+async def test_topic_pause_poll_survives_broker_errors(mocker):
+    """Should keep pause looping when getmany hits a Kafka disconnect."""
+    t = Topic('test')
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+    mocker.patch('slipstream.core.sleep', mocker.AsyncMock())
+    c.__aiter__.return_value = [
+        ConsumerRecord('test', 0, 0, 0, 0, b'key', b'val', None, 0, 0, []),
+        ConsumerRecord('test', 0, 1, 0, 0, b'key', b'val', None, 0, 0, []),
+    ]
+    c.getmany.side_effect = [
+        KafkaConnectionError('broker down'),
+        {},
+    ]
+
+    assert (await t.asend(None)).value == 'val'
+    assert await t.asend(Signal.PAUSE) is Signal.SENTINEL
+    assert await t.asend(Signal.PAUSE) is Signal.SENTINEL
+    assert await t.asend(Signal.PAUSE) is Signal.SENTINEL
+    msg = await t.asend(Signal.RESUME)
+    assert msg.value == 'val'
+    assert c.pause.called
+    assert c.resume.called
+    assert c.getmany.await_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_topic_pause_poll_raises_non_retriable_kafka_error(mocker):
+    """Should surface permanent Kafka errors instead of retrying pause poll."""
+    t = Topic('test')
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    mocker.patch('slipstream.core.AIOKafkaConsumer', return_value=c)
+    mocker.patch('slipstream.core.sleep', mocker.AsyncMock())
+    c.__aiter__.return_value = [
+        ConsumerRecord('test', 0, 0, 0, 0, b'key', b'val', None, 0, 0, []),
+    ]
+    c.getmany.side_effect = TopicAuthorizationFailedError()
+
+    assert (await t.asend(None)).value == 'val'
+    assert await t.asend(Signal.PAUSE) is Signal.SENTINEL
+    with pytest.raises(RuntimeError, match='Error while consuming'):
+        await t.asend(Signal.PAUSE)
 
 
 @pytest.mark.asyncio
