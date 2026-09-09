@@ -664,7 +664,9 @@ if aiokafka_available:
                                 break
                             try:
                                 await consumer.getmany(timeout_ms=3000)
-                            except KafkaError:
+                            except KafkaError as e:
+                                if not getattr(e, 'retriable', False):
+                                    raise
                                 _logger.warning(
                                     '%s pause poll failed; retrying',
                                     self.name,
