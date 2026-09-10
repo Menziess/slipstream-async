@@ -1,7 +1,7 @@
 """Core module."""
 
 import logging
-from asyncio import Event, Lock, gather, sleep, wait_for
+from asyncio import Event, Lock, gather, get_running_loop, sleep, wait_for
 from collections.abc import (
     AsyncGenerator,
     AsyncIterable,
@@ -54,6 +54,8 @@ __all__ = [
 READ_FROM_START = -2
 READ_FROM_END = -1
 PRODUCE_PAUSE_REASON = 'produce'
+YIELD_CHECK_INTERVAL = 64
+YIELD_BUDGET_SECONDS = 0.002
 
 
 _logger = logging.getLogger(__name__)
@@ -282,11 +284,26 @@ class Conf(metaclass=Singleton):
         pausable_stream: PausableStream,
         kwargs: Any,
     ) -> None:
-        """Publish messages from stream."""
+        """Publish messages while giving other ready sources time to run.
+
+        Synchronous sources and handlers may not suspend while publishing.
+        Check elapsed monotonic time every 64 messages and yield to the event
+        loop after using a 2 millisecond execution budget.
+        """
 
         async def _distribute(stream: AsyncIterator[Any], kwargs: Any) -> None:
+            loop = get_running_loop()
+            yield_deadline = loop.time() + YIELD_BUDGET_SECONDS
+            remaining_before_check = YIELD_CHECK_INTERVAL
             async for msg in stream:
                 await self.pubsub.apublish(key, msg, **kwargs)
+                remaining_before_check -= 1
+                if remaining_before_check:
+                    continue
+                remaining_before_check = YIELD_CHECK_INTERVAL
+                if loop.time() >= yield_deadline:
+                    await sleep(0)
+                    yield_deadline = loop.time() + YIELD_BUDGET_SECONDS
 
         if piped_handlers := [
             (handler, v[1]) for handler, v in self.pipes.items() if v[0] == key
