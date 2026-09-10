@@ -232,6 +232,27 @@ async def test_conf(mocker: MockerFixture):
 
 
 @pytest.mark.asyncio
+async def test_distribute_messages_yields_after_execution_budget(
+    mocker: MockerFixture,
+):
+    """Hot synchronous sources should yield after their execution budget."""
+
+    async def source() -> AsyncIterator[int]:
+        for msg in range(2):
+            yield msg
+
+    loop = mocker.Mock()
+    loop.time.side_effect = [0, 0.001, 0.003, 0.003]
+    mocker.patch('slipstream.core.get_running_loop', return_value=loop)
+    sleep_mock = mocker.patch('slipstream.core.sleep', mocker.AsyncMock())
+    conf = Conf()
+
+    await conf._distribute_messages('hot', PausableStream(source()), {})
+
+    sleep_mock.assert_awaited_once_with(0)
+
+
+@pytest.mark.asyncio
 async def test_conf_keyboardinterrupt(mocker: MockerFixture):
     """Should not raise on KeyboardInterrupt."""
     c = Conf()
