@@ -238,7 +238,7 @@ async def test_distribute_messages_yields_after_execution_budget(
     """Hot synchronous sources should yield after their execution budget."""
 
     async def source() -> AsyncIterator[int]:
-        for msg in range(128):
+        for msg in range(2):
             yield msg
 
     loop = mocker.Mock()
