@@ -50,6 +50,7 @@ class Proxy(metaclass=SourceSinkMeta):
 if rocksdict_available:
     from rocksdict import (
         AccessType,
+        BlockBasedOptions,
         ColumnFamily,
         CompactOptions,
         DBCompactionStyle,
@@ -64,6 +65,11 @@ if rocksdict_available:
         WriteBatch,
         WriteOptions,
     )
+
+    # FIFO never merges files otherwise, so every scan and miss reads all
+    # overwritten and deleted rows. rocksdict cannot set this before opening,
+    # and readers must not rewrite the writer's OPTIONS file.
+    _MERGE_FILES = {'compaction_options_fifo': '{allow_compaction=true}'}
 
     class Cache(ICache):
         """Create a RocksDB database in the specified folder.
@@ -91,6 +97,8 @@ if rocksdict_available:
             This configuration setup optimizes for low disk usage.
             (25mb per table).
             The oldest records may be removed during compaction.
+            Writable caches merge small files, dropping overwritten and
+            deleted rows, also with custom ``options``.
 
             https://congyuwang.github.io/RocksDict/rocksdict.html
             """
@@ -106,6 +114,19 @@ if rocksdict_available:
                 else {}
             )
             self.db = Rdict(path, options, column_families, access_type)
+            if self._writable():
+                for name in {'default', *column_families}:
+                    self.db.get_column_family(name).set_options(_MERGE_FILES)
+
+        def _writable(self) -> bool:
+            # rocksdict hides the access type; readers reject flushes.
+            try:
+                self.db.flush()
+            except Exception as e:
+                if 'Not supported operation' in str(e):
+                    return False
+                raise
+            return True
 
         @staticmethod
         def _default_options(target_table_size: int) -> Options:
@@ -131,6 +152,10 @@ if rocksdict_available:
             options.set_max_bytes_for_level_multiplier(4.0)
             options.set_compression_type(DBCompressionType.lz4())
             options.set_delete_obsolete_files_period_micros(10 * 1000)
+            # Lookups of missing keys skip files (~1% false positives).
+            table = BlockBasedOptions()
+            table.set_bloom_filter(10, False)
+            options.set_block_based_table_factory(table)
             return options
 
         @asynccontextmanager
@@ -389,7 +414,9 @@ if rocksdict_available:
         ) -> Rdict:
             """Create column family."""
             options = options or Options()
-            return self.db.create_column_family(name, options)
+            family = self.db.create_column_family(name, options)
+            family.set_options(_MERGE_FILES)
+            return family
 
         def delete_range(
             self,

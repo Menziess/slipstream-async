@@ -1,13 +1,16 @@
 """Cache tests."""
 
+import time
 from asyncio import gather, sleep
 from collections.abc import AsyncIterable, Callable
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
 from rocksdict import (
     AccessType,
     DbClosedError,
+    DBCompactionStyle,
     Options,
     ReadOptions,
     SstFileWriter,
@@ -35,6 +38,53 @@ async def test_proxy():
 
     result, _ = await gather(receive(), send())
     assert result == 'test'
+
+
+def fifo_options() -> Options:
+    """Get FIFO options without the cache defaults."""
+    options = Options()
+    options.create_if_missing(create_if_missing=True)
+    options.set_compaction_style(DBCompactionStyle.fifo())
+    return options
+
+
+def latest_options(path: str) -> str:
+    """Get the latest persisted RocksDB options."""
+    return max(Path(path).glob('OPTIONS-*')).read_text()
+
+
+@pytest.mark.parametrize(
+    ('kwargs', 'bloom'),
+    [
+        ({}, True),
+        ({'options': fifo_options()}, False),
+        ({'access_type': AccessType.with_ttl(3600)}, True),
+    ],
+)
+def test_writers_merge_churned_files(kwargs, bloom):
+    """Should merge small files of every writer, bloom filter by default."""
+    with TemporaryDirectory(dir='tests') as tmp:
+        cache = Cache(tmp, **kwargs)
+        for n in range(8):
+            cache['live'] = n
+            cache[f'gone{n}'] = n
+            del cache[f'gone{n}']
+            cache.flush()
+
+        for _ in range(100):
+            if len(cache.live_files()) < 8:
+                break
+            time.sleep(0.05)
+
+        assert len(cache.live_files()) < 8
+        assert list(cache.items()) == [('live', 7)]
+        assert ('filter_policy=bloomfilter' in latest_options(tmp)) is bloom
+
+        cache.create_column_family('extra')
+        assert latest_options(tmp).count('allow_compaction=true') == 2
+        cache.close()
+        with Cache(tmp, **kwargs):
+            assert latest_options(tmp).count('allow_compaction=true') == 2
 
 
 @pytest.mark.serial
@@ -77,14 +127,17 @@ def test_contextmanager_cache():
 
 
 def test_secondary_db():
-    """Should automatically close cache after use."""
+    """Should open readers without rewriting options, and close them."""
     with TemporaryDirectory(dir='tests') as tmp:
         first_path, second_path = tmp + '/first', tmp + '/secondary'
         first = Cache(first_path)
+        written = sorted(Path(first_path).glob('OPTIONS-*'))
+        readonly = Cache(first_path, access_type=AccessType.read_only())
         secondary = Cache(
             first_path, access_type=AccessType.secondary(second_path)
         )
-        with first, secondary as s:
+        assert sorted(Path(first_path).glob('OPTIONS-*')) == written
+        with first, readonly, secondary as s:
             s.try_catch_up_with_primary()
 
         first.destroy()
