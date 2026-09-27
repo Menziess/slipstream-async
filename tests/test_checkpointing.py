@@ -106,7 +106,8 @@ async def test_handle_stores_configured_checkpoint_state():
 
     await stream()
 
-    checkpoint = Checkpoint.for_handler(activity_handler)
+    checkpoint = activity_handler.checkpoint
+    assert checkpoint
     assert checkpoint.state == {'cursor': 'page-7'}
 
 
@@ -782,16 +783,6 @@ async def test_resume_callback_fires_once_on_overlap(mock_cache):
     assert calls == ['dependency']
 
 
-def test_for_handler_without_checkpoint():
-    """Should raise when no Checkpoint was bound to the handler."""
-
-    def orphan(_msg):
-        return None
-
-    with pytest.raises(KeyError, match='No checkpoint bound'):
-        Checkpoint.for_handler(orphan)
-
-
 @pytest.mark.asyncio
 async def test_handle_depends_on_heartbeats_and_pulses():
     """Should heartbeat the leader and pulse the dependent."""
@@ -816,8 +807,8 @@ async def test_handle_depends_on_heartbeats_and_pulses():
 
     await stream()
 
-    c = Checkpoint.for_handler(activity_handler)
-    assert activity_handler.checkpoint is c  # type: ignore[attr-defined]
+    c = activity_handler.checkpoint
+    assert c
     dep = next(iter(c.dependencies.values()))
     assert dep.checkpoint_marker == datetime(2025, 1, 1, 10, tzinfo=UTC)
     assert c.state_marker == datetime(2025, 1, 1, 10, 5, tzinfo=UTC)
@@ -863,7 +854,8 @@ async def test_handle_uses_dependency_marker_field():
 
     await stream()
 
-    dep = Checkpoint.for_handler(activity_handler)['weather']
+    assert activity_handler.checkpoint
+    dep = activity_handler.checkpoint['weather']
     assert dep.checkpoint_marker == event
 
 
@@ -890,7 +882,8 @@ async def test_handle_depends_on_detects_downtime():
 
     await stream()
 
-    c = Checkpoint.for_handler(activity_handler)
+    c = activity_handler.checkpoint
+    assert c
     dep = next(iter(c.dependencies.values()))
     assert dep.is_down is True
     key = str(id(activity_s))
@@ -1008,8 +1001,41 @@ def test_handle_without_checkpoint_source():
     def plain(_msg):
         return None
 
-    with pytest.raises(KeyError, match='No checkpoint bound'):
-        Checkpoint.for_handler(plain)
+    assert plain.checkpoint is None
+
+
+@pytest.mark.asyncio
+async def test_handle_binds_checkpoint_only_to_its_dependent():
+    """Should not pulse sources listed after a Checkpoint in @handle."""
+
+    async def weather():
+        yield {'timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC)}
+
+    async def activity():
+        await sleep(0.02)
+        yield {'timestamp': datetime(2025, 1, 1, 10, 1, tzinfo=UTC)}
+
+    async def traffic():
+        await sleep(0.04)
+        yield {'jam': True}
+
+    weather_s, activity_s = weather(), activity()
+    seen = []
+
+    @handle(weather_s)
+    def weather_handler(_msg):
+        return None
+
+    @handle(Checkpoint(activity_s, weather_s, marker='timestamp'), traffic())
+    def activity_or_traffic(msg, checkpoint=None):
+        seen.append((msg, checkpoint is not None))
+
+    await stream()
+
+    assert seen == [
+        ({'timestamp': datetime(2025, 1, 1, 10, 1, tzinfo=UTC)}, True),
+        ({'jam': True}, False),
+    ]
 
 
 @pytest.mark.asyncio
