@@ -12,27 +12,7 @@ from slipstream.utils import (
     PubSub,
     Singleton,
     get_param_names,
-    iscoroutinecallable,
 )
-
-
-def test_iscoroutinecallable():
-    """Should check whether function is coroutine."""
-
-    def _s():
-        return True
-
-    async def _a():
-        return True
-
-    class _A:
-        async def __call__(self):
-            return True
-
-    assert not iscoroutinecallable(_s)
-    assert iscoroutinecallable(_a)
-    assert iscoroutinecallable(_A)
-    assert iscoroutinecallable(_A())
 
 
 def test_get_param_names():
@@ -120,11 +100,11 @@ async def test_asyncsynchronizedgenerator():
     # Copies readiness matches synchronization
     assert await anext(g) == 0
     assert await anext(gc1) == 0
-    assert gc1._is_ready
-    assert not gc2._is_ready
+    assert gc1.is_ready
+    assert not gc2.is_ready
     assert await anext(gc2) == 0
-    assert gc1._is_ready
-    assert gc2._is_ready
+    assert gc1.is_ready
+    assert gc2.is_ready
 
     # StopAsyncIteration when generator is exhaused
     with pytest.raises(StopAsyncIteration):

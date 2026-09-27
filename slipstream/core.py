@@ -15,6 +15,7 @@ from collections.abc import (
 from inspect import isasyncgenfunction, signature
 from re import sub
 from typing import (
+    TYPE_CHECKING,
     Any,
     ClassVar,
     Literal,
@@ -30,9 +31,12 @@ from slipstream.utils import (
     PubSub,
     Signal,
     Singleton,
+    awaitable,
     get_param_names,
-    iscoroutinecallable,
 )
+
+if TYPE_CHECKING:
+    from slipstream.checkpointing import Checkpoint
 
 aiokafka_available = False
 
@@ -63,9 +67,7 @@ _logger = logging.getLogger(__name__)
 class Handler(Protocol):
     """Callable returned by ``@handle``."""
 
-    source: Any
-    sources: tuple[Any, ...]
-    checkpoint: Any
+    checkpoint: 'Checkpoint | None'
 
     async def __call__(self, msg: Any, **kwargs: Any) -> Any: ...
 
@@ -759,17 +761,14 @@ async def _sink_output(
     output: Any,
 ) -> None:
     """Sink output depending on sink type."""
-    is_coroutine = iscoroutinecallable(s)
     known_sinks = (Topic, ICache) if aiokafka_available else (ICache,)
-    if isinstance(s, known_sinks) and not isinstance(output, tuple):
+    if not isinstance(s, known_sinks):
+        await awaitable(s(output))
+        return
+    if not isinstance(output, tuple):
         err_msg = f'Sink expects: (key, val) in {f.__name__}, got :{output}'
         raise TypeError(err_msg)
-    if isinstance(s, known_sinks):
-        await s(*output)
-    elif is_coroutine:
-        await s(output)
-    else:
-        s(output)
+    await s(*output)
 
 
 def _get_processor(
@@ -796,60 +795,34 @@ def _get_processor(
     return _process_output
 
 
-def _call_kwargs(
-    params: Iterable[Any],
-    kwargs: dict[str, Any],
-) -> dict[str, Any]:
-    """Forward ``**kwargs``, or only ``downtime`` when that param exists."""
-    params = list(params)
-    if any(p.kind == p.VAR_KEYWORD for p in params):
-        return kwargs
-    named = {
+def _get_handler(
+    f: AsyncCallable, sink: Iterable[Callable | AsyncCallable]
+) -> Callable[..., Awaitable[Any]]:
+    """Get handler wrapper depending on handler signature.
+
+    Forward all keyword arguments to ``**kwargs``, otherwise only the
+    ``downtime`` and ``checkpoint`` parameters the handler names.
+    """
+    params = signature(f).parameters.values()
+    forward_all = any(p.kind == p.VAR_KEYWORD for p in params)
+    forwarded = {'downtime', 'checkpoint'} & {
         p.name
         for p in params
         if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
     }
-    return {
-        k: v
-        for k, v in kwargs.items()
-        if k in named and k in ('downtime', 'checkpoint')
-    }
+    _processor = _get_processor(f, isasyncgenfunction(f), sink)
 
-
-def _get_handler(
-    f: AsyncCallable, sink: Iterable[Callable | AsyncCallable]
-) -> Callable[..., Awaitable[Any]]:
-    """Get handler wrapper depending on handler signature."""
-    params = signature(f).parameters.values()
-    is_coroutine = iscoroutinecallable(f)
-    is_asyncgen = isasyncgenfunction(f)
-
-    _processor = _get_processor(f, is_asyncgen, sink)
-
-    if is_coroutine and not is_asyncgen:
-
-        async def _handler(msg: Any, **kwargs: Any) -> None:
-            """Execute function and handle its output."""
-            extra = _call_kwargs(params, kwargs)
-            if not params:
-                output = await f()
-            elif extra:
-                output = await f(msg, **extra)
-            else:
-                output = await f(msg)
-            await _processor(output)
-    else:
-
-        async def _handler(msg: Any, **kwargs: Any) -> None:
-            """Execute function and handle its output."""
-            extra = _call_kwargs(params, kwargs)
-            if not params:
-                output = f()
-            elif extra:
-                output = f(msg, **extra)
-            else:
-                output = f(msg)
-            await _processor(output)
+    async def _handler(msg: Any, **kwargs: Any) -> None:
+        """Execute function and handle its output."""
+        if not params:
+            output = f()
+        elif forward_all:
+            output = f(msg, **kwargs)
+        else:
+            output = f(
+                msg, **{k: kwargs[k] for k in forwarded & kwargs.keys()}
+            )
+        await _processor(await awaitable(output))
 
     return _handler
 
@@ -875,21 +848,17 @@ def handle(
     def _deco(f: AsyncCallable) -> Handler:
         from slipstream.checkpointing import Checkpoint, bind_checkpoint
 
-        handler: Any = _get_handler(f, sink)
-        handler.checkpoint = None
-        plain = handler
-        sources: list[Any] = []
+        plain: Any = _get_handler(f, sink)
+        plain.checkpoint = None
+        handler = plain
         for item in iterable:
             source, source_handler = item, plain
             if isinstance(item, Checkpoint):
                 source = item.dependent
                 source_handler = handler = bind_checkpoint(f, plain, item)
-            sources.append(source)
             iterable_key = str(id(source))
             c.register_iterable(iterable_key, source)
             c.register_handler(iterable_key, source_handler, *pipe)
-        handler.source = sources[0] if sources else None
-        handler.sources = tuple(sources)
         return cast('Handler', handler)
 
     return _deco

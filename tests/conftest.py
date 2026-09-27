@@ -10,7 +10,6 @@ import pytest
 from testcontainers.kafka import KafkaContainer
 
 from slipstream import Cache
-from slipstream.checkpointing import Checkpoint
 from slipstream.core import Conf
 from slipstream.interfaces import ICache, Key
 from slipstream.utils import PubSub, Singleton
@@ -31,7 +30,6 @@ def reset_singletons():
         conf.iterables = {}  # type: ignore[attr-defined]
         conf.pipes = {}  # type: ignore[attr-defined]
         conf.exit_hooks = set()  # type: ignore[attr-defined]
-    Checkpoint._by_handler = {}
 
 
 @pytest.fixture

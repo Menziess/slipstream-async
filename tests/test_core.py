@@ -472,7 +472,9 @@ async def test_aiter_fail(mocker, caplog):
     topic = 'test'
     t = Topic(topic, {})
 
-    with pytest.raises(RuntimeError, match=''):
+    with pytest.raises(
+        RuntimeError, match=f'Error while consuming from Topic {topic}'
+    ):
         await anext(t)
 
     assert f'Error while consuming from Topic {topic}' in caplog.text
