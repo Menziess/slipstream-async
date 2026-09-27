@@ -1013,6 +1013,40 @@ def test_handle_without_checkpoint_source():
 
 
 @pytest.mark.asyncio
+async def test_handle_binds_checkpoint_only_to_its_dependent():
+    """Should not pulse sources listed after a Checkpoint in @handle."""
+
+    async def weather():
+        yield {'timestamp': datetime(2025, 1, 1, 10, tzinfo=UTC)}
+
+    async def activity():
+        await sleep(0.02)
+        yield {'timestamp': datetime(2025, 1, 1, 10, 1, tzinfo=UTC)}
+
+    async def traffic():
+        await sleep(0.04)
+        yield {'jam': True}
+
+    weather_s, activity_s = weather(), activity()
+    seen = []
+
+    @handle(weather_s)
+    def weather_handler(_msg):
+        return None
+
+    @handle(Checkpoint(activity_s, weather_s, marker='timestamp'), traffic())
+    def activity_or_traffic(msg, checkpoint=None):
+        seen.append((msg, checkpoint is not None))
+
+    await stream()
+
+    assert seen == [
+        ({'timestamp': datetime(2025, 1, 1, 10, 1, tzinfo=UTC)}, True),
+        ({'jam': True}, False),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_check_pulse_skips_seed_for_custom_check(mock_cache):
     """Should leave initial state to a custom downtime policy."""
 

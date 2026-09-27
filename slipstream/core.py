@@ -877,17 +877,17 @@ def handle(
 
         handler: Any = _get_handler(f, sink)
         handler.checkpoint = None
+        plain = handler
         sources: list[Any] = []
         for item in iterable:
+            source, source_handler = item, plain
             if isinstance(item, Checkpoint):
                 source = item.dependent
-                handler = bind_checkpoint(f, handler, item)
-            else:
-                source = item
+                source_handler = handler = bind_checkpoint(f, plain, item)
             sources.append(source)
             iterable_key = str(id(source))
             c.register_iterable(iterable_key, source)
-            c.register_handler(iterable_key, handler, *pipe)
+            c.register_handler(iterable_key, source_handler, *pipe)
         handler.source = sources[0] if sources else None
         handler.sources = tuple(sources)
         return cast('Handler', handler)
