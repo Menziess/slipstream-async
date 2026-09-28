@@ -65,7 +65,7 @@ Data is persisted to disk and automatically loaded upon restart, adding to appli
 
 By default, it will retain a window size of 25 MB using `Fifo <https://rocksdict.github.io/RocksDict/rocksdict.html#DBCompactionStyle>`_ compaction, this can be configured by passing ``options`` in :py:class:`slipstream.caching.Cache`.
 
-Every writable cache also merges small files in all its column families, dropping overwritten and deleted rows, even with custom ``options``. With ``AccessType.with_ttl``, merging also removes expired rows. The default ``options`` add bloom filters as well. Scans and lookups of missing keys therefore stay fast when a cache sees many writes and deletes. Read-only and secondary caches read the files their writer merged.
+To see what the defaults do, or what to pass along with custom ``options``, read :doc:`optimizations <optimizations>`.
 
 Transaction
 ^^^^^^^^^^^
