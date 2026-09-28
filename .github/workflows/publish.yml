@@ -9,14 +9,14 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.10"
+          python-version: "3.14"
 
       - name: Set package version
         run: echo "PACKAGE_VERSION=$(git describe --abbrev=0 --tags)" >> $GITHUB_ENV
