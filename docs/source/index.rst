@@ -76,4 +76,5 @@ Proceed by interacting with Kafka and caching application state in: :doc:`gettin
    getting_started
    cookbook
    features
+   optimizations
    autoapi/index
