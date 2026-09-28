@@ -99,7 +99,7 @@ def merge_settings(text: str) -> int:
     )
 
 
-def settle(cache: Cache) -> None:
+def settle(cache: Cache | Rdict) -> None:
     """Wait until flushes and compactions stop changing the files."""
     files = None
     for _ in range(100):
@@ -138,6 +138,32 @@ def test_first_merge_keeps_old_rows():
             assert old >= 0.9 * n
             largest = max(f['size'] for f in cache.live_files())
             assert MB < largest <= 25 * MB // 4
+
+
+def churn(db: Cache | Rdict) -> float:
+    """Time scans after 300 flushes of 30 live keys and many deletes."""
+    for n in range(12_000):
+        db[f'f{n}'] = n
+        if n >= 30:
+            del db[f'f{n - 30}']
+        if n % 40 == 39:
+            db.flush()
+    settle(db)
+    start = time.perf_counter()
+    for _ in range(200):
+        list(db.items())
+    return time.perf_counter() - start
+
+
+def test_merges_keep_churned_scans_fast():
+    """Should scan a churned cache far faster than without merging."""
+    with TemporaryDirectory(dir='tests') as tmp:
+        unmerged = Rdict(f'{tmp}/unmerged', Cache._default_options(25 * MB))
+        slow = churn(unmerged)
+        unmerged.close()
+        with Cache(f'{tmp}/merged') as cache:
+            fast = churn(cache)
+        assert fast * 10 < slow
 
 
 @pytest.mark.serial
