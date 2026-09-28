@@ -66,11 +66,6 @@ if rocksdict_available:
         WriteOptions,
     )
 
-    # FIFO never merges files otherwise, so every scan and miss reads all
-    # overwritten and deleted rows. rocksdict cannot set this before opening,
-    # and readers must not rewrite the writer's OPTIONS file.
-    _MERGE_FILES = {'compaction_options_fifo': '{allow_compaction=true}'}
-
     class Cache(ICache):
         """Create a RocksDB database in the specified folder.
 
@@ -98,7 +93,10 @@ if rocksdict_available:
             (25mb per table).
             The oldest records may be removed during compaction.
             Writable caches merge small files, dropping overwritten and
-            deleted rows, also with custom ``options``.
+            deleted rows, also with custom ``options``. A merge covers at
+            most a quarter of ``target_table_size``, and files never
+            expire by age. With custom ``options``, pass their FIFO window
+            as ``target_table_size``.
 
             https://congyuwang.github.io/RocksDict/rocksdict.html
             """
@@ -114,9 +112,21 @@ if rocksdict_available:
                 else {}
             )
             self.db = Rdict(path, options, column_families, access_type)
+            # FIFO never merges files otherwise, so every scan and miss reads
+            # all overwritten and deleted rows. A merged file takes the age
+            # and queue position of its oldest input, and FIFO drops files
+            # whole, so merges stay small and nothing expires by age.
+            # rocksdict cannot set this before opening, and readers must not
+            # rewrite the writer's OPTIONS file.
+            self._merge_files = {
+                'compaction_options_fifo': '{allow_compaction=true}',
+                'max_compaction_bytes': str(target_table_size // 4),
+                'ttl': '0',
+            }
             if self._writable():
                 for name in {'default', *column_families}:
-                    self.db.get_column_family(name).set_options(_MERGE_FILES)
+                    family = self.db.get_column_family(name)
+                    family.set_options(self._merge_files)
 
         def _writable(self) -> bool:
             # rocksdict hides the access type; readers reject flushes.
@@ -415,7 +425,7 @@ if rocksdict_available:
             """Create column family."""
             options = options or Options()
             family = self.db.create_column_family(name, options)
-            family.set_options(_MERGE_FILES)
+            family.set_options(self._merge_files)
             return family
 
         def delete_range(

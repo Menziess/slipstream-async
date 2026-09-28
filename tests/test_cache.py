@@ -1,5 +1,7 @@
 """Cache tests."""
 
+import os
+import re
 import time
 from asyncio import gather, sleep
 from collections.abc import AsyncIterable, Callable
@@ -12,13 +14,14 @@ from rocksdict import (
     DbClosedError,
     DBCompactionStyle,
     Options,
+    Rdict,
     ReadOptions,
     SstFileWriter,
     WriteBatch,
     WriteOptions,
 )
 
-from slipstream.caching import Cache, Proxy
+from slipstream.caching import MB, Cache, Proxy
 
 
 @pytest.mark.asyncio
@@ -81,10 +84,60 @@ def test_writers_merge_churned_files(kwargs, bloom):
         assert ('filter_policy=bloomfilter' in latest_options(tmp)) is bloom
 
         cache.create_column_family('extra')
-        assert latest_options(tmp).count('allow_compaction=true') == 2
+        assert merge_settings(latest_options(tmp)) == 2
         cache.close()
         with Cache(tmp, **kwargs):
-            assert latest_options(tmp).count('allow_compaction=true') == 2
+            assert merge_settings(latest_options(tmp)) == 2
+
+
+def merge_settings(text: str) -> int:
+    """Count column families that merge files without whole-cache drops."""
+    return min(
+        text.count('allow_compaction=true'),
+        len(re.findall(r'^\s*ttl=0$', text, re.MULTILINE)),
+        text.count(f'max_compaction_bytes={25 * MB // 4}\n'),
+    )
+
+
+def settle(cache: Cache) -> None:
+    """Wait until flushes and compactions stop changing the files."""
+    files = None
+    for _ in range(100):
+        time.sleep(0.25)
+        busy = cache.property_value('rocksdb.num-running-compactions') != '0'
+        current = {f['name'] for f in cache.live_files()}
+        if current == files and not busy:
+            return
+        files = current
+
+
+def row() -> bytes:
+    """Get a row that compresses like real records do."""
+    return os.urandom(150) + bytes(450)
+
+
+def test_first_merge_keeps_old_rows():
+    """Should only drop the oldest files once a full cache merges."""
+    with TemporaryDirectory(dir='tests') as tmp:
+        unmerged = Rdict(tmp, Cache._default_options(25 * MB))
+        n = 0
+        while sum(f['size'] for f in unmerged.live_files()) < 24 * MB:
+            for _ in range(1000):
+                unmerged[f'old{n}'] = row()
+                n += 1
+        unmerged.close()
+
+        with Cache(tmp) as cache:
+            settle(cache)
+            for i in range(12_000):
+                cache[f'new{i}'] = row()
+            cache.flush()
+            settle(cache)
+
+            old = sum(1 for _ in cache.keys(prefix='old'))
+            assert old >= 0.9 * n
+            largest = max(f['size'] for f in cache.live_files())
+            assert MB < largest <= 25 * MB // 4
 
 
 @pytest.mark.serial

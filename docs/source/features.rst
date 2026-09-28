@@ -67,6 +67,8 @@ By default, it will retain a window size of 25 MB using `Fifo <https://rocksdict
 
 Every writable cache also merges small files in all its column families, dropping overwritten and deleted rows, even with custom ``options``. With ``AccessType.with_ttl``, merging also removes expired rows. The default ``options`` add bloom filters as well. Scans and lookups of missing keys therefore stay fast when a cache sees many writes and deletes. Read-only and secondary caches read the files their writer merged.
 
+Instead of expiring files by age, the window is bounded by size only. A merged file counts as old as its oldest input, so one merge covers at most a quarter of ``target_table_size``, and the window never drops more than that at once. With custom ``options``, pass their FIFO window as ``target_table_size`` too. Use ``AccessType.with_ttl`` to expire rows by age.
+
 Transaction
 ^^^^^^^^^^^
 
