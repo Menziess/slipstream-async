@@ -949,6 +949,18 @@ async def test_commit_skips_partitions_no_longer_assigned(mocker):
 
 
 @pytest.mark.asyncio
+async def test_get_consumer_keeps_auto_commit_for_direct_readers(mocker):
+    """Should only replace auto commit when read through the stream."""
+    ctor, _ = _consumer(mocker, [])
+    t = Topic('test', {'group_id': 'g'})
+
+    await t.get_consumer()
+
+    assert 'enable_auto_commit' not in ctor.call_args.kwargs
+    assert t.commit_interval is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     'conf', [{}, {'group_id': 'g', 'enable_auto_commit': False}]
 )

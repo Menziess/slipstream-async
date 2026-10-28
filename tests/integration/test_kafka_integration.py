@@ -6,6 +6,7 @@ from datetime import timedelta, timezone
 from typing import cast
 
 import pytest
+from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from conftest import iterable_to_async
 
@@ -316,3 +317,30 @@ async def test_rebalance_does_not_lose_messages(kafka, timeout):
 
         assert seen['a'] | seen['b'] == expected
         assert seen['b']
+
+
+@pytest.mark.asyncio
+async def test_idle_stream_commits_handled_messages(kafka, timeout):
+    """Should commit the last messages of a burst without a new message."""
+    name = 'test_idle_commit'
+    t = _topic(kafka, name, auto_commit_interval_ms=500)
+    await t(b'k', b'a')
+    await t(b'k', b'b')
+
+    with timeout(seconds=60):
+        assert (await anext(t)).value == 'a'
+        waiting = create_task(anext(t))
+        assert (await waiting).value == 'b'
+        waiting = create_task(anext(t))
+        await sleep(2)
+
+        reader = AIOKafkaConsumer(bootstrap_servers=kafka, group_id=name)
+        await reader.start()
+        try:
+            committed = await reader.committed(TopicPartition(name, 0))
+        finally:
+            await reader.stop()
+        waiting.cancel()
+        await t.exit_hook()
+
+    assert committed == 2

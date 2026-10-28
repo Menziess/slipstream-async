@@ -455,6 +455,7 @@ if aiokafka_available:
             self.producer: AIOKafkaProducer | None = None
             self.commit_interval: float | None = None
             self._handled: dict[TopicPartition, int] = {}
+            self._committed: dict[TopicPartition, int] = {}
             self._committed_at = monotonic()
             self._producer_lock = Lock()
             self._generator: (
@@ -561,13 +562,25 @@ if aiokafka_available:
                 for p, o in offsets.items():
                     c.seek(p, o)
 
-        async def get_consumer(self) -> AIOKafkaConsumer:
-            """Get started instance of Kafka consumer."""
+        async def get_consumer(
+            self, commit_handled: bool = False
+        ) -> AIOKafkaConsumer:
+            """Get started instance of Kafka consumer.
+
+            Args:
+                commit_handled: Replace the consumer auto commit by
+                    committing messages the stream has handled. Only
+                    useful when the consumer is read through the stream.
+            """
             params = get_param_names(AIOKafkaConsumer)
             if self.codec:
                 self.conf['value_deserializer'] = self.codec.decode
             conf = {k: v for k, v in self.conf.items() if k in params}
-            if conf.get('group_id') and conf.get('enable_auto_commit', True):
+            if (
+                commit_handled
+                and conf.get('group_id')
+                and conf.get('enable_auto_commit', True)
+            ):
                 conf['enable_auto_commit'] = False
                 self.commit_interval = (
                     conf.get('auto_commit_interval_ms', 5000) / 1000
@@ -627,9 +640,10 @@ if aiokafka_available:
                 self._handled = {
                     tp: o for tp, o in self._handled.items() if tp in owned
                 }
-                if self._handled:
+                if self._handled and self._handled != self._committed:
                     try:
                         await self.consumer.commit(self._handled)
+                        self._committed = dict(self._handled)
                     except KafkaError as e:
                         log_msg = (
                             f'Failed to commit offsets of {self.name}: {e!r}'
@@ -710,6 +724,28 @@ if aiokafka_available:
                         counted=True,
                     )
 
+        async def _read(
+            self, messages: AsyncIterator[ConsumerRecord[Any, Any]]
+        ) -> ConsumerRecord[Any, Any]:
+            """Read next message, committing handled offsets while idle."""
+            while True:
+                try:
+                    return await wait_for(
+                        anext(messages), self.commit_interval or None
+                    )
+                except AsyncioTimeoutError:  # noqa: PERF203
+                    await self._commit_handled()
+
+        async def _mark_handled(self, msg: ConsumerRecord[Any, Any]) -> None:
+            """Remember handled offset and commit once the interval passed."""
+            if self.commit_interval is None:
+                return
+            self._handled[TopicPartition(msg.topic, msg.partition)] = (
+                msg.offset + 1
+            )
+            if monotonic() - self._committed_at >= self.commit_interval:
+                await self._commit_handled()
+
         async def _get_generator(
             self,
             consumer: AIOKafkaConsumer,
@@ -721,22 +757,19 @@ if aiokafka_available:
             signal = None
             try:
                 msg: ConsumerRecord[Any, Any]
-                async for msg in consumer:
+                messages = aiter(consumer)
+                while True:
+                    try:
+                        msg = await self._read(messages)
+                    except StopAsyncIteration:
+                        break
                     msg.key = self._maybe_decode(msg.key, 'key_deserializer')
                     msg.value = self._maybe_decode(
                         msg.value, 'value_deserializer'
                     )
 
                     signal = yield msg
-                    if self.commit_interval is not None:
-                        self._handled[
-                            TopicPartition(msg.topic, msg.partition)
-                        ] = msg.offset + 1
-                        if (
-                            monotonic() - self._committed_at
-                            >= self.commit_interval
-                        ):
-                            await self._commit_handled()
+                    await self._mark_handled(msg)
 
                     if signal is Signal.PAUSE:
                         consumer.pause(*consumer.assignment())
@@ -775,7 +808,7 @@ if aiokafka_available:
         ]:
             """Initialize generator."""
             if not self.consumer:
-                self.consumer = await self.get_consumer()
+                self.consumer = await self.get_consumer(commit_handled=True)
             if not self._generator:
                 return self._get_generator(self.consumer)
             return self._generator
