@@ -421,8 +421,11 @@ if aiokafka_available:
         ``auto_commit_interval_ms`` once a message is handled, which is
         when the stream asks for the next one, and not when it is read.
         A crash or rebalance can replay up to one interval of messages, so
-        handling is at least once. Set ``enable_auto_commit`` to ``False``
-        to commit yourself.
+        handling is at least once. This only applies to topics bound with
+        `handle`; reading a topic directly keeps the consumer auto commit,
+        which can skip the message that was in flight on shutdown.
+        Set ``enable_auto_commit`` to ``False`` to commit yourself with
+        `commit`.
         """
 
         def __init__(
@@ -454,6 +457,7 @@ if aiokafka_available:
             self.consumer: AIOKafkaConsumer | None = None
             self.producer: AIOKafkaProducer | None = None
             self.commit_interval: float | None = None
+            self.commit_handled = False
             self._handled: dict[TopicPartition, int] = {}
             self._committed: dict[TopicPartition, int] = {}
             self._committed_at = monotonic()
@@ -630,6 +634,27 @@ if aiokafka_available:
                     if not self.producer:
                         self.producer = await self.get_producer()
             await self._send_with_retry(key, value, headers_list, **kwargs)
+
+        def on_handle(self) -> None:
+            """Commit handled messages instead of the consumer auto commit."""
+            self.commit_handled = True
+
+        async def commit(
+            self, offsets: dict[TopicPartition, int] | None = None
+        ) -> None:
+            """Commit given offsets, or the handled ones, and raise on error.
+
+            Args:
+                offsets: Next offset to read per partition. Defaults to
+                    the offsets of messages the stream has handled.
+            """
+            if not self.consumer:
+                err_msg = f'Topic {self.name} has no consumer to commit'
+                raise RuntimeError(err_msg)
+            offsets = offsets if offsets is not None else self._handled
+            if offsets:
+                await self.consumer.commit(offsets)
+                self._committed = {**self._committed, **offsets}
 
         async def _commit_handled(self) -> None:
             """Commit offsets of handled messages we still own."""
@@ -808,7 +833,9 @@ if aiokafka_available:
         ]:
             """Initialize generator."""
             if not self.consumer:
-                self.consumer = await self.get_consumer(commit_handled=True)
+                self.consumer = await self.get_consumer(
+                    commit_handled=self.commit_handled
+                )
             if not self._generator:
                 return self._get_generator(self.consumer)
             return self._generator
@@ -970,6 +997,8 @@ def handle(
             if isinstance(item, Checkpoint):
                 source = item.dependent
                 source_handler = handler = bind_checkpoint(f, plain, item)
+            if on_handle := getattr(source, 'on_handle', None):
+                on_handle()
             iterable_key = str(id(source))
             c.register_iterable(iterable_key, source)
             c.register_handler(iterable_key, source_handler, *pipe)

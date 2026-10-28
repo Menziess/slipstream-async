@@ -14,6 +14,7 @@ from aiokafka import (
 from aiokafka.errors import (
     CommitFailedError,
     KafkaConnectionError,
+    KafkaError,
     KafkaTimeoutError,
     NotEnoughReplicasError,
     RequestTimedOutError,
@@ -905,6 +906,7 @@ async def test_consumer_commits_only_handled_messages(mocker):
     """Should not commit the message that is still being handled."""
     ctor, c = _consumer(mocker, [_record(0), _record(1), _record(2)])
     t = Topic('test', {'group_id': 'g', 'auto_commit_interval_ms': 0})
+    t.commit_handled = True
     tp = TopicPartition('test', 0)
 
     await t.asend(None)
@@ -922,6 +924,7 @@ async def test_exit_hook_commits_handled_and_survives_failure(mocker, caplog):
     _, c = _consumer(mocker, [_record(0), _record(1)])
     c.commit.side_effect = CommitFailedError()
     t = Topic('test', {'group_id': 'g'})
+    t.commit_handled = True
 
     await t.asend(None)
     await t.asend(None)
@@ -937,6 +940,7 @@ async def test_commit_skips_partitions_no_longer_assigned(mocker):
     """Should not commit a partition that moved to another consumer."""
     _, c = _consumer(mocker, [_record(0), _record(1, 1), _record(2)])
     t = Topic('test', {'group_id': 'g'})
+    t.commit_handled = True
     tp0 = TopicPartition('test', 0)
 
     await t.asend(None)
@@ -958,6 +962,53 @@ async def test_get_consumer_keeps_auto_commit_for_direct_readers(mocker):
 
     assert 'enable_auto_commit' not in ctor.call_args.kwargs
     assert t.commit_interval is None
+
+
+@pytest.mark.asyncio
+async def test_iterating_a_topic_keeps_auto_commit(mocker):
+    """Should only replace auto commit for topics bound with handle."""
+    ctor, _ = _consumer(mocker, [_record(0)])
+    t = Topic('test', {'group_id': 'g'})
+
+    await t.asend(None)
+
+    assert 'enable_auto_commit' not in ctor.call_args.kwargs
+    assert t.commit_interval is None
+
+
+def test_handle_binds_topic_to_commit_handled():
+    """Should mark a topic as stream bound once handled."""
+    t = Topic('test', {'group_id': 'g'})
+
+    @handle(t)
+    async def handler(msg, **kwargs):
+        pass
+
+    assert t.commit_handled
+
+
+@pytest.mark.asyncio
+async def test_commit_explicit_offsets_and_raises(mocker):
+    """Should commit given offsets and surface commit errors."""
+    _, c = _consumer(mocker, [_record(0)])
+    t = Topic('test', {'group_id': 'g', 'enable_auto_commit': False})
+    await t.get_consumer()
+    t.consumer = c
+    tp0 = TopicPartition('test', 0)
+
+    await t.commit({tp0: 5})
+    c.commit.assert_awaited_once_with({tp0: 5})
+
+    c.commit.side_effect = KafkaError()
+    with pytest.raises(KafkaError):
+        await t.commit({tp0: 6})
+
+
+@pytest.mark.asyncio
+async def test_commit_without_consumer_raises():
+    """Should not silently skip a commit without consumer."""
+    with pytest.raises(RuntimeError):
+        await Topic('test').commit()
 
 
 @pytest.mark.asyncio

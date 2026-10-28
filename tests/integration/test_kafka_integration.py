@@ -193,7 +193,7 @@ async def test_topic_pause_poll_keeps_group_and_offset(kafka, timeout):
 
 
 def _topic(kafka: str, name: str, **conf) -> Topic:
-    return Topic(
+    topic = Topic(
         name,
         {
             'bootstrap_servers': kafka,
@@ -202,6 +202,8 @@ def _topic(kafka: str, name: str, **conf) -> Topic:
             **conf,
         },
     )
+    topic.commit_handled = True
+    return topic
 
 
 @pytest.mark.asyncio
