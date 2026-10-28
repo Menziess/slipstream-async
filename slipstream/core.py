@@ -1,7 +1,15 @@
 """Core module."""
 
 import logging
-from asyncio import Event, Lock, gather, get_running_loop, sleep, wait_for
+from asyncio import (
+    Event,
+    Lock,
+    gather,
+    get_running_loop,
+    sleep,
+    wait_for,
+)
+from asyncio import TimeoutError as AsyncioTimeoutError
 from collections.abc import (
     AsyncGenerator,
     AsyncIterable,
@@ -14,6 +22,7 @@ from collections.abc import (
 )
 from inspect import isasyncgenfunction, signature
 from re import sub
+from time import monotonic
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -58,6 +67,7 @@ __all__ = [
 READ_FROM_START = -2
 READ_FROM_END = -1
 PRODUCE_PAUSE_REASON = 'produce'
+PRODUCE_TIMEOUT_SECONDS = 120.0
 YIELD_BUDGET_SECONDS = 0.002
 
 
@@ -399,6 +409,23 @@ if aiokafka_available:
         seconds) on ``Conf`` or the topic ``conf`` to retry retriable
         broker errors. Sources are paused via ``Conf.signal_iterables``
         while retrying.
+
+        A produce attempt that is not acknowledged within
+        ``produce_timeout`` seconds (default 120, ``None`` or ``0``
+        disables) is not retried and raises a ``RuntimeError``.
+        An idempotent producer otherwise retries forever, and the stream
+        stalls until the consumer is kicked out of its group. The message
+        may still be delivered later, so do not retry it.
+
+        With a ``group_id``, offsets are committed every
+        ``auto_commit_interval_ms`` once a message is handled, which is
+        when the stream asks for the next one, and not when it is read.
+        A crash or rebalance can replay up to one interval of messages, so
+        handling is at least once. This only applies to topics bound with
+        `handle`; reading a topic directly keeps the consumer auto commit,
+        which can skip the message that was in flight on shutdown.
+        Set ``enable_auto_commit`` to ``False`` to commit yourself with
+        `commit`.
         """
 
         def __init__(
@@ -418,6 +445,10 @@ if aiokafka_available:
             self.produce_retry_backoff = float(
                 merged.pop('produce_retry_backoff', 1.0)
             )
+            timeout = merged.pop('produce_timeout', PRODUCE_TIMEOUT_SECONDS)
+            self.produce_timeout: float | None = (
+                float(timeout) if timeout else None
+            )
             self.conf = merged
             self.starting_offset = offset
             self.codec = codec
@@ -425,6 +456,11 @@ if aiokafka_available:
 
             self.consumer: AIOKafkaConsumer | None = None
             self.producer: AIOKafkaProducer | None = None
+            self.commit_interval: float | None = None
+            self.commit_handled = False
+            self._handled: dict[TopicPartition, int] = {}
+            self._committed: dict[TopicPartition, int] = {}
+            self._committed_at = monotonic()
             self._producer_lock = Lock()
             self._generator: (
                 AsyncGenerator[
@@ -530,15 +566,30 @@ if aiokafka_available:
                 for p, o in offsets.items():
                     c.seek(p, o)
 
-        async def get_consumer(self) -> AIOKafkaConsumer:
-            """Get started instance of Kafka consumer."""
+        async def get_consumer(
+            self, commit_handled: bool = False
+        ) -> AIOKafkaConsumer:
+            """Get started instance of Kafka consumer.
+
+            Args:
+                commit_handled: Replace the consumer auto commit by
+                    committing messages the stream has handled. Only
+                    useful when the consumer is read through the stream.
+            """
             params = get_param_names(AIOKafkaConsumer)
             if self.codec:
                 self.conf['value_deserializer'] = self.codec.decode
-            consumer = AIOKafkaConsumer(
-                self.name,
-                **{k: v for k, v in self.conf.items() if k in params},
-            )
+            conf = {k: v for k, v in self.conf.items() if k in params}
+            if (
+                commit_handled
+                and conf.get('group_id')
+                and conf.get('enable_auto_commit', True)
+            ):
+                conf['enable_auto_commit'] = False
+                self.commit_interval = (
+                    conf.get('auto_commit_interval_ms', 5000) / 1000
+                )
+            consumer = AIOKafkaConsumer(self.name, **conf)
             await consumer.start()
             if self.starting_offset is not None:
                 try:
@@ -584,6 +635,47 @@ if aiokafka_available:
                         self.producer = await self.get_producer()
             await self._send_with_retry(key, value, headers_list, **kwargs)
 
+        def on_handle(self) -> None:
+            """Commit handled messages instead of the consumer auto commit."""
+            self.commit_handled = True
+
+        async def commit(
+            self, offsets: dict[TopicPartition, int] | None = None
+        ) -> None:
+            """Commit given offsets, or the handled ones, and raise on error.
+
+            Args:
+                offsets: Next offset to read per partition. Defaults to
+                    the offsets of messages the stream has handled.
+            """
+            if not self.consumer:
+                err_msg = f'Topic {self.name} has no consumer to commit'
+                raise RuntimeError(err_msg)
+            offsets = offsets if offsets is not None else self._handled
+            if offsets:
+                await self.consumer.commit(offsets)
+                self._committed = {**self._committed, **offsets}
+
+        async def _commit_handled(self) -> None:
+            """Commit offsets of handled messages we still own."""
+            if self.consumer:
+                owned = self.consumer.assignment()
+                # shortcut: a partition revoked and reassigned between
+                # commits keeps its old offset, which only replays messages.
+                self._handled = {
+                    tp: o for tp, o in self._handled.items() if tp in owned
+                }
+                if self._handled and self._handled != self._committed:
+                    try:
+                        await self.consumer.commit(self._handled)
+                        self._committed = dict(self._handled)
+                    except KafkaError as e:
+                        log_msg = (
+                            f'Failed to commit offsets of {self.name}: {e!r}'
+                        )
+                        _logger.warning(log_msg)
+            self._committed_at = monotonic()
+
         async def _send_with_retry(
             self,
             key: Any,
@@ -602,14 +694,24 @@ if aiokafka_available:
             try:
                 for attempt in range(attempts):
                     try:
-                        await producer.send_and_wait(
-                            self.name,
-                            key=key,
-                            value=value,
-                            headers=headers_list,
-                            **kwargs,
+                        await wait_for(
+                            producer.send_and_wait(
+                                self.name,
+                                key=key,
+                                value=value,
+                                headers=headers_list,
+                                **kwargs,
+                            ),
+                            self.produce_timeout,
                         )
-                    except Exception as e:  # noqa: PERF203
+                    except AsyncioTimeoutError as e:  # noqa: PERF203
+                        err_msg = (
+                            f'Error while producing to Topic {self.name}: '
+                            f'not acknowledged within {self.produce_timeout}s'
+                        )
+                        _logger.exception(err_msg)
+                        raise RuntimeError(err_msg) from e
+                    except Exception as e:
                         retriable = (
                             attempt + 1 < attempts
                             and is_retriable_produce_error(e)
@@ -647,6 +749,28 @@ if aiokafka_available:
                         counted=True,
                     )
 
+        async def _read(
+            self, messages: AsyncIterator[ConsumerRecord[Any, Any]]
+        ) -> ConsumerRecord[Any, Any]:
+            """Read next message, committing handled offsets while idle."""
+            while True:
+                try:
+                    return await wait_for(
+                        anext(messages), self.commit_interval or None
+                    )
+                except AsyncioTimeoutError:  # noqa: PERF203
+                    await self._commit_handled()
+
+        async def _mark_handled(self, msg: ConsumerRecord[Any, Any]) -> None:
+            """Remember handled offset and commit once the interval passed."""
+            if self.commit_interval is None:
+                return
+            self._handled[TopicPartition(msg.topic, msg.partition)] = (
+                msg.offset + 1
+            )
+            if monotonic() - self._committed_at >= self.commit_interval:
+                await self._commit_handled()
+
         async def _get_generator(
             self,
             consumer: AIOKafkaConsumer,
@@ -658,13 +782,19 @@ if aiokafka_available:
             signal = None
             try:
                 msg: ConsumerRecord[Any, Any]
-                async for msg in consumer:
+                messages = aiter(consumer)
+                while True:
+                    try:
+                        msg = await self._read(messages)
+                    except StopAsyncIteration:
+                        break
                     msg.key = self._maybe_decode(msg.key, 'key_deserializer')
                     msg.value = self._maybe_decode(
                         msg.value, 'value_deserializer'
                     )
 
                     signal = yield msg
+                    await self._mark_handled(msg)
 
                     if signal is Signal.PAUSE:
                         consumer.pause(*consumer.assignment())
@@ -703,7 +833,9 @@ if aiokafka_available:
         ]:
             """Initialize generator."""
             if not self.consumer:
-                self.consumer = await self.get_consumer()
+                self.consumer = await self.get_consumer(
+                    commit_handled=self.commit_handled
+                )
             if not self._generator:
                 return self._get_generator(self.consumer)
             return self._generator
@@ -736,6 +868,15 @@ if aiokafka_available:
 
         async def exit_hook(self) -> None:
             """Cleanup and finalization."""
+            if self.commit_interval is not None:
+                try:
+                    await wait_for(self._commit_handled(), timeout=10)
+                except Exception as e:  # noqa: BLE001
+                    log_msg = (
+                        f'Offsets of topic "{self.name}" failed '
+                        f'to commit on shutdown: {e!r}'
+                    )
+                    _logger.critical(log_msg)
             for client in (self.consumer, self.producer):
                 if not client:
                     continue
@@ -856,6 +997,8 @@ def handle(
             if isinstance(item, Checkpoint):
                 source = item.dependent
                 source_handler = handler = bind_checkpoint(f, plain, item)
+            if on_handle := getattr(source, 'on_handle', None):
+                on_handle()
             iterable_key = str(id(source))
             c.register_iterable(iterable_key, source)
             c.register_handler(iterable_key, source_handler, *pipe)

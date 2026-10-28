@@ -12,7 +12,9 @@ from aiokafka import (
     TopicPartition,
 )
 from aiokafka.errors import (
+    CommitFailedError,
     KafkaConnectionError,
+    KafkaError,
     KafkaTimeoutError,
     NotEnoughReplicasError,
     RequestTimedOutError,
@@ -25,6 +27,7 @@ from slipstream import Conf
 from slipstream.codecs import JsonCodec
 from slipstream.core import (
     PRODUCE_PAUSE_REASON,
+    PRODUCE_TIMEOUT_SECONDS,
     READ_FROM_END,
     READ_FROM_START,
     PausableStream,
@@ -848,3 +851,182 @@ async def test_handle(mocker: MockerFixture):
     await stream()
 
     sink.assert_called_once_with(123)
+
+
+def _record(offset: int, partition: int = 0) -> ConsumerRecord:
+    return ConsumerRecord(
+        'test', partition, offset, 0, 0, b'key', b'val', None, 0, 0, []
+    )
+
+
+def _consumer(mocker: MockerFixture, records: list[ConsumerRecord]):
+    """Get topic consumer mock that is assigned partition 0 and 1."""
+    c = mocker.AsyncMock(spec=AIOKafkaConsumer)
+    c.assignment = mocker.Mock(
+        return_value={TopicPartition('test', 0), TopicPartition('test', 1)}
+    )
+    c.__aiter__.return_value = records
+    ctor = mocker.patch(
+        'slipstream.core.AIOKafkaConsumer', autospec=True, return_value=c
+    )
+    return ctor, c
+
+
+@pytest.mark.asyncio
+async def test_produce_timeout_raises_when_send_never_completes(mocker):
+    """Should stop waiting for a send that is never acknowledged."""
+    mock_producer = mocker.patch(
+        'slipstream.core.AIOKafkaProducer',
+        autospec=True,
+    ).return_value
+
+    async def hang(*_, **__):
+        await Event().wait()
+
+    mock_producer.send_and_wait = mocker.AsyncMock(side_effect=hang)
+    topic = Topic('out', {'produce_timeout': 0.05, 'produce_retries': 3})
+
+    with pytest.raises(RuntimeError, match=r'not acknowledged within 0\.05s'):
+        await topic('k', 'v')
+
+    assert mock_producer.send_and_wait.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_produce_timeout_defaults_and_can_be_disabled():
+    """Should bound produces by default and allow disabling the bound."""
+    assert Topic('out').produce_timeout == PRODUCE_TIMEOUT_SECONDS
+    assert Topic('out', {'produce_timeout': None}).produce_timeout is None
+    assert Topic('out', {'produce_timeout': 0}).produce_timeout is None
+    assert 'produce_timeout' not in Topic('out', {'produce_timeout': 1}).conf
+
+
+@pytest.mark.asyncio
+async def test_consumer_commits_only_handled_messages(mocker):
+    """Should not commit the message that is still being handled."""
+    ctor, c = _consumer(mocker, [_record(0), _record(1), _record(2)])
+    t = Topic('test', {'group_id': 'g', 'auto_commit_interval_ms': 0})
+    t.commit_handled = True
+    tp = TopicPartition('test', 0)
+
+    await t.asend(None)
+    c.commit.assert_not_awaited()
+    await t.asend(None)
+    c.commit.assert_awaited_once_with({tp: 1})
+    await t.asend(None)
+    c.commit.assert_awaited_with({tp: 2})
+    assert ctor.call_args.kwargs['enable_auto_commit'] is False
+
+
+@pytest.mark.asyncio
+async def test_exit_hook_commits_handled_and_survives_failure(mocker, caplog):
+    """Should commit on shutdown and log a failed commit."""
+    _, c = _consumer(mocker, [_record(0), _record(1)])
+    c.commit.side_effect = CommitFailedError()
+    t = Topic('test', {'group_id': 'g'})
+    t.commit_handled = True
+
+    await t.asend(None)
+    await t.asend(None)
+    c.commit.assert_not_awaited()
+    await t.exit_hook()
+
+    c.commit.assert_awaited_once_with({TopicPartition('test', 0): 1})
+    assert 'Failed to commit offsets of test' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_commit_skips_partitions_no_longer_assigned(mocker):
+    """Should not commit a partition that moved to another consumer."""
+    _, c = _consumer(mocker, [_record(0), _record(1, 1), _record(2)])
+    t = Topic('test', {'group_id': 'g'})
+    t.commit_handled = True
+    tp0 = TopicPartition('test', 0)
+
+    await t.asend(None)
+    await t.asend(None)
+    await t.asend(None)
+    c.assignment.return_value = {tp0}
+    await t.exit_hook()
+
+    c.commit.assert_awaited_once_with({tp0: 1})
+
+
+@pytest.mark.asyncio
+async def test_get_consumer_keeps_auto_commit_for_direct_readers(mocker):
+    """Should only replace auto commit when read through the stream."""
+    ctor, _ = _consumer(mocker, [])
+    t = Topic('test', {'group_id': 'g'})
+
+    await t.get_consumer()
+
+    assert 'enable_auto_commit' not in ctor.call_args.kwargs
+    assert t.commit_interval is None
+
+
+@pytest.mark.asyncio
+async def test_iterating_a_topic_keeps_auto_commit(mocker):
+    """Should only replace auto commit for topics bound with handle."""
+    ctor, _ = _consumer(mocker, [_record(0)])
+    t = Topic('test', {'group_id': 'g'})
+
+    await t.asend(None)
+
+    assert 'enable_auto_commit' not in ctor.call_args.kwargs
+    assert t.commit_interval is None
+
+
+def test_handle_binds_topic_to_commit_handled():
+    """Should mark a topic as stream bound once handled."""
+    t = Topic('test', {'group_id': 'g'})
+
+    @handle(t)
+    async def handler(msg, **kwargs):
+        pass
+
+    assert t.commit_handled
+
+
+@pytest.mark.asyncio
+async def test_commit_explicit_offsets_and_raises(mocker):
+    """Should commit given offsets and surface commit errors."""
+    _, c = _consumer(mocker, [_record(0)])
+    t = Topic('test', {'group_id': 'g', 'enable_auto_commit': False})
+    await t.get_consumer()
+    t.consumer = c
+    tp0 = TopicPartition('test', 0)
+
+    await t.commit({tp0: 5})
+    c.commit.assert_awaited_once_with({tp0: 5})
+
+    c.commit.side_effect = KafkaError()
+    with pytest.raises(KafkaError):
+        await t.commit({tp0: 6})
+
+
+@pytest.mark.asyncio
+async def test_commit_without_consumer_raises():
+    """Should not silently skip a commit without consumer."""
+    with pytest.raises(RuntimeError):
+        await Topic('test').commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'conf', [{}, {'group_id': 'g', 'enable_auto_commit': False}]
+)
+async def test_commits_left_to_the_user_without_group_or_when_disabled(
+    mocker, conf
+):
+    """Should not manage commits without group or with auto commit off."""
+    ctor, c = _consumer(mocker, [_record(0), _record(1)])
+    t = Topic('test', conf)
+
+    await t.asend(None)
+    await t.asend(None)
+    await t.exit_hook()
+
+    c.commit.assert_not_awaited()
+    assert ctor.call_args.kwargs.get('enable_auto_commit') is conf.get(
+        'enable_auto_commit'
+    )
