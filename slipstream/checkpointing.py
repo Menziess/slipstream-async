@@ -87,9 +87,9 @@ class Dependency:
         | None = None,
         recovery_check: AsyncCallable[['Checkpoint', 'Dependency'], bool]
         | None = None,
-        recovery_interval: timedelta | None = None,
         marker: Callable[..., Any] | str | None = None,
         state: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None,
+        recovery_interval: timedelta | None = None,
     ) -> None:
         """Initialize dependency for checkpointing."""
         self.name = name
@@ -115,8 +115,9 @@ class Dependency:
             and now - last < self.recovery_interval.total_seconds()
         ):
             return False
-        self._last_recovery_check = now
-        return await awaitable(self.recovery_check(checkpoint, self))
+        ok = await awaitable(self.recovery_check(checkpoint, self))
+        self._last_recovery_check = None if ok else now
+        return ok
 
     def uses_default_downtime_check(self) -> bool:
         """Return whether first-pulse event-time seeding applies."""

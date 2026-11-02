@@ -1148,3 +1148,22 @@ async def test_recovery_interval_elapsed_checks_again(mocker):
     await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
     assert dep.is_down is False
     assert check.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_resets_after_recovery(mocker):
+    """Should check immediately when a new downtime follows a recovery."""
+    check = mocker.AsyncMock(return_value=True)
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=timedelta(seconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    clock = mocker.patch('slipstream.checkpointing.monotonic')
+    for now in (100.0, 103.0):
+        dep.is_down = True
+        clock.return_value = now
+        await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert check.call_count == 2
