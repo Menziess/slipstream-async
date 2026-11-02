@@ -848,3 +848,13 @@ async def test_handle(mocker: MockerFixture):
     await stream()
 
     sink.assert_called_once_with(123)
+
+
+@pytest.mark.asyncio
+async def test_pausable_stream_ended():
+    """Should flag the stream as ended once the iterable is exhausted."""
+    stream = PausableStream(emoji())
+    assert not stream.ended.is_set()
+    async for _ in stream:
+        pass
+    assert stream.ended.is_set()

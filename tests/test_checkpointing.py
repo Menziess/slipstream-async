@@ -1,6 +1,6 @@
 """Checkpointing tests."""
 
-from asyncio import Event, create_task, gather, sleep
+from asyncio import Event, create_task, gather, sleep, wait_for
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -1170,71 +1170,6 @@ async def test_recovery_interval_resets_after_recovery(mocker):
 
 
 @pytest.mark.asyncio
-async def test_recovery_interval_rechecks_without_new_messages(mocker):
-    """Should recover and resume without another message."""
-    check = mocker.AsyncMock(side_effect=[False, False, True])
-    dep = Dependency(
-        'dependency',
-        emoji(),
-        recovery_check=check,
-        recovery_interval=timedelta(milliseconds=10),
-    )
-    cp = Checkpoint(emoji(), dep, name='dependent')
-    cp._awaiting_resume = True
-    recovered = mocker.AsyncMock()
-    cp._recovery_callback = recovered
-    dep.is_down = True
-
-    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
-    assert dep.is_down is True
-
-    await sleep(0.1)
-    assert dep.is_down is False
-    assert check.call_count == 3
-    recovered.assert_called_once_with(cp, dep)
-    assert dep.recovery_task is None
-
-
-@pytest.mark.asyncio
-async def test_recovery_retry_survives_check_error(mocker):
-    """Should keep polling when a background recovery check raises."""
-    check = mocker.AsyncMock(side_effect=[False, RuntimeError('boom'), True])
-    dep = Dependency(
-        'dependency',
-        emoji(),
-        recovery_check=check,
-        recovery_interval=timedelta(milliseconds=10),
-    )
-    cp = Checkpoint(emoji(), dep, name='dependent')
-    dep.is_down = True
-
-    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
-    await sleep(0.1)
-    assert dep.is_down is False
-    assert check.call_count == 3
-
-
-@pytest.mark.asyncio
-async def test_recovery_task_cancelled_on_shutdown(mocker):
-    """Should cancel the background recovery worker on shutdown."""
-    dep = Dependency(
-        'dependency',
-        emoji(),
-        recovery_check=mocker.AsyncMock(return_value=False),
-        recovery_interval=timedelta(seconds=10),
-    )
-    cp = Checkpoint(emoji(), dep, name='dependent')
-    dep.is_down = True
-
-    assert cp._cancel_recovery_tasks not in Conf().exit_hooks
-    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
-    assert dep.recovery_task is not None
-    assert cp._cancel_recovery_tasks in Conf().exit_hooks
-    await cp._cancel_recovery_tasks()
-    assert dep.recovery_task is None
-
-
-@pytest.mark.asyncio
 async def test_recovery_interval_reserved_before_check_finishes(mocker):
     """Should not start an overlapping check within the interval."""
     check = mocker.AsyncMock(return_value=False)
@@ -1249,55 +1184,109 @@ async def test_recovery_interval_reserved_before_check_finishes(mocker):
     assert check.call_count == 1
 
 
-@pytest.mark.asyncio
-async def test_recovery_retry_does_not_swallow_recovery_callback_error(
-    mocker,
-):
-    """Should surface an on_recovery failure instead of logging it."""
+async def _idle():
+    """Source that never yields."""
+    await sleep(3600)
+    yield
+
+
+def _bound(on_recovery, check):
+    """Bind a down dependency whose recovery is checked every 10ms."""
     dep = Dependency(
         'dependency',
-        emoji(),
-        recovery_check=mocker.AsyncMock(side_effect=[False, True]),
+        _idle(),
+        recovery_check=check,
         recovery_interval=timedelta(milliseconds=10),
+        marker='timestamp',
     )
     cp = Checkpoint(
-        emoji(),
+        _idle(),
         dep,
-        name='dependent',
-        on_recovery=mocker.AsyncMock(side_effect=RuntimeError('seek')),
+        marker='timestamp',
+        on_recovery=on_recovery,
     )
     cp._awaiting_resume = True
     dep.is_down = True
 
-    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
-    task = dep.recovery_task
-    assert task is not None
-    with pytest.raises(RuntimeError, match='seek'):
-        await task
+    @handle(cp)
+    def handler(_msg):
+        return None
+
+    return dep
 
 
 @pytest.mark.asyncio
-async def test_recovery_retry_from_pulse_resumes_without_messages(mocker):
-    """Should recover and resume a pulse-driven dependent on its own."""
-    dep = Dependency(
-        'dependency',
-        emoji(),
-        downtime_check=mocker.AsyncMock(return_value=None),
-        recovery_check=mocker.AsyncMock(side_effect=[False, True]),
-        recovery_interval=timedelta(milliseconds=10),
-    )
-    recovered = mocker.AsyncMock()
-    cp = Checkpoint(
-        emoji(),
-        dep,
-        name='dependent',
-        on_recovery=recovered,
-    )
-    cp._awaiting_resume = True
-    dep.is_down = True
+async def test_recovery_interval_rechecks_without_messages(mocker):
+    """Should recover and resume a paused dependent without messages."""
+    recovered = mocker.Mock()
+    dep = _bound(recovered, mocker.AsyncMock(side_effect=[False, True]))
 
-    await cp.check_pulse(datetime(2025, 1, 1, tzinfo=UTC))
-    assert dep.recovery_task is not None
+    task = create_task(stream())
     await sleep(0.1)
+    task.cancel()
+
     assert dep.is_down is False
-    recovered.assert_called_once_with(cp, dep)
+    recovered.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_recovery_check_error_crashes_the_stream(mocker):
+    """Should crash the app when a background recovery check fails."""
+    _bound(mocker.Mock(), mocker.AsyncMock(side_effect=RuntimeError('boom')))
+
+    with pytest.raises(RuntimeError, match='boom'):
+        await wait_for(stream(), 1)
+
+
+@pytest.mark.asyncio
+async def test_on_recovery_error_crashes_the_stream(mocker):
+    """Should crash the app when on_recovery fails after a recovery."""
+    _bound(
+        mocker.Mock(side_effect=RuntimeError('seek')),
+        mocker.AsyncMock(return_value=True),
+    )
+
+    with pytest.raises(RuntimeError, match='seek'):
+        await wait_for(stream(), 1)
+
+
+async def _two():
+    """Finite source."""
+    yield {'timestamp': datetime(2025, 1, 1, tzinfo=UTC)}
+    yield {'timestamp': datetime(2025, 1, 1, 0, 1, tzinfo=UTC)}
+
+
+def _finite_checkpoint(recovery_interval):
+    """Bind a checkpoint over two finite sources; return its source count."""
+    dependency, dependent = _two(), _two()
+
+    @handle(
+        Checkpoint(
+            dependent,
+            Dependency(
+                'dependency',
+                dependency,
+                recovery_interval=recovery_interval,
+            ),
+            marker='timestamp',
+        )
+    )
+    def handler(_msg):
+        return None
+
+    return len(Conf().iterables)
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_does_not_keep_finished_streams_running():
+    """Should let stream() return once the real sources have ended."""
+    _finite_checkpoint(timedelta(seconds=10))
+    await wait_for(stream(), 2)
+
+
+@pytest.mark.asyncio
+async def test_no_recovery_interval_adds_no_source():
+    """Should register no extra source when no interval is set."""
+    assert _finite_checkpoint(None) == 2
+    Conf().iterables.clear()
+    assert _finite_checkpoint(timedelta(seconds=10)) == 3
