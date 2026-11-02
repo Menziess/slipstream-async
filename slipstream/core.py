@@ -113,6 +113,7 @@ class PausableStream:
         self.signal: Signal | Any = None
         self.running: Event = Event()
         self.running.set()
+        self.ended: Event = Event()
 
     def send_signal(
         self,
@@ -170,6 +171,14 @@ class PausableStream:
 
     async def __anext__(self) -> Any:
         """Consume iterator while it's not paused."""
+        try:
+            return await self._next()
+        except StopAsyncIteration:
+            self.ended.set()
+            raise
+
+    async def _next(self) -> Any:
+        """Get the next message once the stream is running."""
         it = self._iterator or self.__aiter__()
 
         if hasattr(it, 'asend'):

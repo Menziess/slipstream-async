@@ -1,6 +1,6 @@
 """Checkpointing tests."""
 
-from asyncio import Event, create_task, sleep
+from asyncio import Event, create_task, gather, sleep, wait_for
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -1098,3 +1098,164 @@ async def test_handle_passes_downtime_argument():
     assert seen
     assert seen[0] == timedelta(hours=1)
     assert list(seen[0].values()) == [timedelta(hours=1)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('interval', 'times', 'results', 'is_down'),
+    [
+        (None, (100, 101, 102), [False] * 3, True),
+        (timedelta(seconds=10), (100, 105, 109), [False], True),
+        (timedelta(seconds=10), (100, 105, 111), [False, True], False),
+    ],
+    ids=['every-heartbeat', 'throttled', 'checks-again-after-interval'],
+)
+async def test_recovery_interval_limits_recovery_checks(
+    interval,
+    times,
+    results,
+    is_down,
+    mocker,
+):
+    """Should run recovery_check at most once per recovery_interval."""
+    check = mocker.AsyncMock(side_effect=results)
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=interval,
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    dep.is_down = True
+    clock = mocker.patch('slipstream.checkpointing.monotonic')
+    for now in times:
+        clock.return_value = now
+        await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert check.call_count == len(results)
+    assert dep.is_down is is_down
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_resets_after_recovery(mocker):
+    """Should check immediately when a new downtime follows a recovery."""
+    check = mocker.AsyncMock(return_value=True)
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=timedelta(seconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    clock = mocker.patch('slipstream.checkpointing.monotonic')
+    for now in (100.0, 103.0):
+        dep.is_down = True
+        clock.return_value = now
+        await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert check.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_reserved_before_check_finishes(mocker):
+    """Should not start an overlapping check within the interval."""
+    check = mocker.AsyncMock(return_value=False)
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=timedelta(seconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    await gather(dep.recovered(cp), dep.recovered(cp))
+    assert check.call_count == 1
+
+
+async def _idle():
+    """Source that never yields."""
+    await sleep(3600)
+    yield
+
+
+async def _two():
+    """Finite source."""
+    yield {'timestamp': datetime(2025, 1, 1, tzinfo=UTC)}
+    yield {'timestamp': datetime(2025, 1, 1, 0, 1, tzinfo=UTC)}
+
+
+def _bind(source, interval, check=None, on_recovery=None, down=False):
+    """Bind a checkpoint over two sources made by ``source``."""
+    dep = Dependency(
+        'dependency',
+        source(),
+        recovery_check=check,
+        recovery_interval=interval,
+        marker='timestamp',
+    )
+    cp = Checkpoint(
+        source(),
+        dep,
+        marker='timestamp',
+        on_recovery=on_recovery,
+    )
+    cp._awaiting_resume = down
+    dep.is_down = down
+
+    @handle(cp)
+    def handler(_msg):
+        return None
+
+    return dep
+
+
+TICK = timedelta(milliseconds=10)
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_rechecks_without_messages(mocker):
+    """Should recover and resume a paused dependent without messages."""
+    recovered = mocker.Mock()
+    check = mocker.AsyncMock(side_effect=[False, True])
+    dep = _bind(_idle, TICK, check, recovered, down=True)
+
+    task = create_task(stream())
+    await sleep(0.1)
+    task.cancel()
+
+    assert dep.is_down is False
+    recovered.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_recovery_check_error_crashes_the_stream(mocker):
+    """Should crash the app when a background recovery check fails."""
+    check = mocker.AsyncMock(side_effect=RuntimeError('boom'))
+    _bind(_idle, TICK, check, down=True)
+
+    with pytest.raises(RuntimeError, match='boom'):
+        await wait_for(stream(), 1)
+
+
+@pytest.mark.asyncio
+async def test_on_recovery_error_crashes_the_stream(mocker):
+    """Should crash the app when on_recovery fails after a recovery."""
+    recovered = mocker.Mock(side_effect=RuntimeError('seek'))
+    _bind(_idle, TICK, mocker.AsyncMock(return_value=True), recovered, True)
+
+    with pytest.raises(RuntimeError, match='seek'):
+        await wait_for(stream(), 1)
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_does_not_keep_finished_streams_running():
+    """Should let stream() return once the real sources have ended."""
+    _bind(_two, timedelta(seconds=10))
+    await wait_for(stream(), 2)
+
+
+@pytest.mark.asyncio
+async def test_no_recovery_interval_adds_no_source():
+    """Should register no extra source when no interval is set."""
+    _bind(_two, None)
+    assert len(Conf().iterables) == 2
+    Conf().iterables.clear()
+    _bind(_two, timedelta(seconds=10))
+    assert len(Conf().iterables) == 3

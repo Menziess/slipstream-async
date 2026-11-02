@@ -1,5 +1,6 @@
 """Slipstream checkpointing."""
 
+import asyncio
 import logging
 from collections.abc import (
     AsyncIterable,
@@ -8,11 +9,13 @@ from collections.abc import (
     Callable,
     Generator,
 )
+from contextlib import suppress
 from datetime import datetime, timedelta
 from functools import wraps
+from time import monotonic
 from typing import Any
 
-from slipstream.core import Conf, Signal
+from slipstream.core import Conf, PausableStream, Signal
 from slipstream.interfaces import ICache
 from slipstream.utils import AsyncCallable, awaitable
 
@@ -67,6 +70,9 @@ class Dependency:
     The dependency name should not be changed once created,
     it is used to persist the dependency in the cache.
 
+    ``recovery_check`` runs on every heartbeat and pulse while down. Pass
+    a ``recovery_interval`` to run an expensive check less often.
+
     >>> async def emoji():
     ...     for emoji in '🏆📞🐟👌':
     ...         yield emoji
@@ -85,6 +91,7 @@ class Dependency:
         | None = None,
         marker: Callable[..., Any] | str | None = None,
         state: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None,
+        recovery_interval: timedelta | None = None,
     ) -> None:
         """Initialize dependency for checkpointing."""
         self.name = name
@@ -97,6 +104,24 @@ class Dependency:
         self.marker = marker
         self.state_extractor = state
         self.is_down = False
+        self.recovery_interval = recovery_interval
+        self._last_recovery_check: float | None = None
+
+    async def recovered(self, checkpoint: 'Checkpoint') -> bool:
+        """Run ``recovery_check``, at most once per ``recovery_interval``."""
+        now = monotonic()
+        last = self._last_recovery_check
+        if (
+            self.recovery_interval
+            and last is not None
+            and now - last < self.recovery_interval.total_seconds()
+        ):
+            return False
+        self._last_recovery_check = now
+        ok = await awaitable(self.recovery_check(checkpoint, self))
+        if ok:
+            self._last_recovery_check = None
+        return ok
 
     def uses_default_downtime_check(self) -> bool:
         """Return whether first-pulse event-time seeding applies."""
@@ -309,9 +334,7 @@ class Checkpoint:
         )
 
         if dependency.is_down:
-            if await awaitable(dependency.recovery_check(self, dependency)):
-                dependency.is_down = False
-            await self._resume_if_cleared(dependency)
+            await self.check_recovery(dependency)
 
         return {
             'is_late': dependency.is_down,
@@ -384,12 +407,15 @@ class Checkpoint:
                 dependency.is_down = True
             return down_now
 
-        if dependency.is_down and await awaitable(
-            dependency.recovery_check(self, dependency)
-        ):
+        if dependency.is_down:
+            await self.check_recovery(dependency)
+        return None
+
+    async def check_recovery(self, dependency: Dependency) -> None:
+        """Clear downtime and resume the dependent once recovered."""
+        if await dependency.recovered(self):
             dependency.is_down = False
             await self._resume_if_cleared(dependency)
-        return None
 
     def _signal_dependent(self, signal: Signal) -> None:
         """Pause or resume the dependent iterable when configured to do so."""
@@ -508,6 +534,21 @@ def _observe(
     return state, _marker_value(marker, msg)
 
 
+async def _recovery_ticks(
+    source: PausableStream,
+    interval: timedelta,
+) -> AsyncIterator[None]:
+    """Yield once per interval until the source has ended."""
+    while True:
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                source.ended.wait(),
+                interval.total_seconds(),
+            )
+            return
+        yield
+
+
 def bind_checkpoint(
     f: Callable[..., Any],
     handler: Callable[..., Awaitable[Any]],
@@ -565,6 +606,27 @@ def bind_checkpoint(
             )
 
         c.register_handler(key, _heartbeat)
+
+        if dependency.recovery_interval:
+            # A throttled heartbeat can skip the last message that shows
+            # the dependency caught up. A registered source keeps checking
+            # without messages, and a failing check crashes the app.
+            ticks = _recovery_ticks(
+                c.iterables[key],
+                dependency.recovery_interval,
+            )
+            ticks_key = str(id(ticks))
+            c.register_iterable(ticks_key, ticks)
+
+            async def _recover(
+                _tick: None,
+                _dependency: Dependency = dependency,
+                **_kwargs: Any,
+            ) -> None:
+                if _dependency.is_down:
+                    await checkpoint.check_recovery(_dependency)
+
+            c.register_handler(ticks_key, _recover)
 
     _pulsed.checkpoint = checkpoint  # type: ignore[attr-defined]
     return _pulsed

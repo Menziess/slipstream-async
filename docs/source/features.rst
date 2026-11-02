@@ -326,4 +326,21 @@ Rather than pausing ``activity``, leave it running:
 - Activity keeps flowing while weather is behind
 - Still read ``checkpoint.downtime`` if those messages need different handling
 
+The default recovery check is ``checkpoint_marker > state_marker``: the dependency must be ahead of the dependent, while downtime is only detected beyond ``downtime_threshold``. That fits a paused dependent, whose marker stands still. A dependent that keeps running (``pause_dependent=False``) moves its marker on, so a dependency a few seconds behind never counts as recovered. Pass your own ``recovery_check`` for that case, for example one based on consumer lag.
+
+While a dependency is down, ``recovery_check`` runs on every heartbeat (each dependency message) and every pulse, so a check that calls out to a broker or service slows the dependency stream down. Set ``recovery_interval`` to run it at most once per interval:
+
+::
+
+    Dependency(
+        'weather',
+        weather,
+        recovery_check=weather_caught_up,
+        recovery_interval=timedelta(seconds=10),
+    )
+
+- Recovery is noticed within one to two intervals after the dependency has caught up
+- The first check after downtime is detected runs immediately
+- A checkpoint bound with ``handle`` also checks once per interval without new messages, until the dependency stream ends, so a paused dependent resumes when the dependency stops sending. That check runs like any other handler: if it or ``on_recovery`` raises, the app stops
+
 A full example is in :ref:`cookbook:synchronization`.
