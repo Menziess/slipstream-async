@@ -1,13 +1,16 @@
 """Test integration with kafka."""
 
+from asyncio import Event, create_task, gather, sleep
 from datetime import datetime as dt
 from datetime import timedelta, timezone
 from typing import cast
 
 import pytest
+from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from conftest import iterable_to_async
 
-from slipstream import Conf, Topic
+from slipstream import Conf, Topic, handle, stream
 from slipstream.checkpointing import Checkpoint, Dependency
 from slipstream.codecs import JsonCodec
 from slipstream.core import Signal
@@ -187,3 +190,159 @@ async def test_topic_pause_poll_keeps_group_and_offset(kafka, timeout):
             assert await t.asend(Signal.PAUSE) is Signal.SENTINEL
         assert (await t.asend(Signal.RESUME)).value == 'b'
         assert (await t.asend(None)).value == 'c'
+
+
+def _topic(kafka: str, name: str, **conf) -> Topic:
+    topic = Topic(
+        name,
+        {
+            'bootstrap_servers': kafka,
+            'auto_offset_reset': 'earliest',
+            'group_id': name,
+            **conf,
+        },
+    )
+    topic.commit_handled = True
+    return topic
+
+
+@pytest.mark.asyncio
+async def test_message_in_flight_is_redelivered_after_shutdown(kafka, timeout):
+    """Should not skip the message that was being handled on shutdown."""
+    name = 'test_in_flight_redelivered'
+    t = _topic(kafka, name)
+    for value in (b'a', b'b', b'c'):
+        await t(b'k', value)
+
+    with timeout(seconds=60):
+        assert (await anext(t)).value == 'a'
+        await t.exit_hook()
+
+        t = _topic(kafka, name)
+        assert (await anext(t)).value == 'a'
+        assert (await anext(t)).value == 'b'
+        await t.exit_hook()
+
+        t = _topic(kafka, name)
+        assert (await anext(t)).value == 'b'
+        await t.exit_hook()
+
+
+@pytest.mark.asyncio
+async def test_handler_error_does_not_commit_failed_message(kafka, timeout):
+    """Should process the failed message again after the stream crashed."""
+    name = 'test_handler_error_not_committed'
+    t = _topic(kafka, name)
+    for value in (b'a', b'b'):
+        await t(b'k', value)
+    seen = []
+
+    @handle(t)
+    def handler(msg):
+        seen.append(msg.value)
+        if msg.value == 'b':
+            err_msg = 'poison'
+            raise ValueError(err_msg)
+
+    with timeout(seconds=60), pytest.raises(ValueError, match='poison'):
+        await stream()
+
+    assert seen == ['a', 'b']
+
+    seen.clear()
+    t = _topic(kafka, name)
+    assert (await anext(t)).value == 'b'
+    await t.exit_hook()
+
+
+@pytest.mark.asyncio
+async def test_produce_timeout_when_broker_stops_responding(
+    kafka, kafka_container, timeout
+):
+    """Should raise instead of waiting forever on an idempotent producer."""
+    t = _topic(
+        kafka,
+        'test_produce_timeout',
+        enable_idempotence=True,
+        produce_timeout=3,
+        request_timeout_ms=3000,
+    )
+    container = kafka_container.get_wrapped_container()
+
+    with timeout(seconds=60):
+        await t(b'k', b'before')
+        container.pause()
+        try:
+            with pytest.raises(RuntimeError, match='not acknowledged'):
+                await t(b'k', b'during')
+        finally:
+            container.unpause()
+        await t.exit_hook()
+
+
+@pytest.mark.asyncio
+async def test_rebalance_does_not_lose_messages(kafka, timeout):
+    """Should deliver every message when a second consumer joins."""
+    name = 'test_rebalance'
+    admin = AIOKafkaAdminClient(bootstrap_servers=kafka)
+    await admin.start()
+    await admin.create_topics([NewTopic(name, 2, 1)])
+    await admin.close()
+
+    a = _topic(kafka, name, session_timeout_ms=6000)
+    for partition in (0, 1):
+        for i in range(3):
+            await a(b'k', f'{partition}-{i}'.encode(), partition=partition)
+    expected = {f'{p}-{i}' for p in (0, 1) for i in range(3)}
+
+    seen: dict[str, set[str]] = {'a': set(), 'b': set()}
+    done = Event()
+
+    async def consume(t: Topic, who: str) -> None:
+        async for msg in t:
+            seen[who].add(cast('str', msg.value))
+            if seen['a'] | seen['b'] == expected and seen['b']:
+                done.set()
+            await sleep(0.05)
+
+    with timeout(seconds=90):
+        first = await anext(a)
+        seen['a'].add(cast('str', first.value))
+        b = _topic(kafka, name, session_timeout_ms=6000)
+        tasks = [create_task(consume(a, 'a')), create_task(consume(b, 'b'))]
+        await done.wait()
+        for task in tasks:
+            task.cancel()
+        await gather(*tasks, return_exceptions=True)
+        await a.exit_hook()
+        await b.exit_hook()
+
+        assert seen['a'] | seen['b'] == expected
+        assert seen['b']
+
+
+@pytest.mark.asyncio
+async def test_idle_stream_commits_handled_messages(kafka, timeout):
+    """Should commit the last messages of a burst without a new message."""
+    name = 'test_idle_commit'
+    t = _topic(kafka, name, auto_commit_interval_ms=500)
+    await t(b'k', b'a')
+    await t(b'k', b'b')
+
+    with timeout(seconds=60):
+        assert (await anext(t)).value == 'a'
+        waiting = create_task(anext(t))
+        assert (await waiting).value == 'b'
+        waiting = create_task(anext(t))
+        await sleep(2)
+
+        reader = AIOKafkaConsumer(bootstrap_servers=kafka, group_id=name)
+        await reader.start()
+        try:
+            committed = await reader.committed(TopicPartition(name, 0))
+        finally:
+            await reader.stop()
+        waiting.cancel()
+        await t.exit_hook()
+
+    assert committed == 2

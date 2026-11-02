@@ -44,14 +44,20 @@ def cache() -> Generator[Cache, None]:
 
 
 @pytest.fixture(scope='session')
-def kafka():
-    """Get running kafka broker."""
+def kafka_container():
+    """Get running kafka broker container."""
     kafka = KafkaContainer().with_kraft()
     try:
         kafka.start()
-        yield kafka.get_bootstrap_server()
+        yield kafka
     finally:
         kafka.stop()
+
+
+@pytest.fixture(scope='session')
+def kafka(kafka_container):
+    """Get bootstrap server of running kafka broker."""
+    return kafka_container.get_bootstrap_server()
 
 
 @pytest.fixture
