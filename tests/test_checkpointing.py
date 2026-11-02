@@ -1226,8 +1226,10 @@ async def test_recovery_task_cancelled_on_shutdown(mocker):
     cp = Checkpoint(emoji(), dep, name='dependent')
     dep.is_down = True
 
+    assert cp._cancel_recovery_tasks not in Conf().exit_hooks
     await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
     assert dep.recovery_task is not None
+    assert cp._cancel_recovery_tasks in Conf().exit_hooks
     await cp._cancel_recovery_tasks()
     assert dep.recovery_task is None
 
@@ -1245,3 +1247,57 @@ async def test_recovery_interval_reserved_before_check_finishes(mocker):
     cp = Checkpoint(emoji(), dep, name='dependent')
     await gather(dep.recovered(cp), dep.recovered(cp))
     assert check.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_retry_does_not_swallow_recovery_callback_error(
+    mocker,
+):
+    """Should surface an on_recovery failure instead of logging it."""
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=mocker.AsyncMock(side_effect=[False, True]),
+        recovery_interval=timedelta(milliseconds=10),
+    )
+    cp = Checkpoint(
+        emoji(),
+        dep,
+        name='dependent',
+        on_recovery=mocker.AsyncMock(side_effect=RuntimeError('seek')),
+    )
+    cp._awaiting_resume = True
+    dep.is_down = True
+
+    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    task = dep.recovery_task
+    assert task is not None
+    with pytest.raises(RuntimeError, match='seek'):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_recovery_retry_from_pulse_resumes_without_messages(mocker):
+    """Should recover and resume a pulse-driven dependent on its own."""
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        downtime_check=mocker.AsyncMock(return_value=None),
+        recovery_check=mocker.AsyncMock(side_effect=[False, True]),
+        recovery_interval=timedelta(milliseconds=10),
+    )
+    recovered = mocker.AsyncMock()
+    cp = Checkpoint(
+        emoji(),
+        dep,
+        name='dependent',
+        on_recovery=recovered,
+    )
+    cp._awaiting_resume = True
+    dep.is_down = True
+
+    await cp.check_pulse(datetime(2025, 1, 1, tzinfo=UTC))
+    assert dep.recovery_task is not None
+    await sleep(0.1)
+    assert dep.is_down is False
+    recovered.assert_called_once_with(cp, dep)

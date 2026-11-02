@@ -283,7 +283,6 @@ class Checkpoint:
         self._downtime_callback = on_downtime
         self._recovery_callback = on_recovery
         self._awaiting_resume = False
-        Conf().register_exit_hook(self._cancel_recovery_tasks)
 
         self.state = {}
         self.state_marker: Any = None
@@ -335,11 +334,7 @@ class Checkpoint:
         )
 
         if dependency.is_down:
-            if await dependency.recovered(self):
-                dependency.is_down = False
-            else:
-                self._schedule_recovery(dependency)
-            await self._resume_if_cleared(dependency)
+            await self._try_recover(dependency)
 
         return {
             'is_late': dependency.is_down,
@@ -413,12 +408,16 @@ class Checkpoint:
             return down_now
 
         if dependency.is_down:
-            if await dependency.recovered(self):
-                dependency.is_down = False
-                await self._resume_if_cleared(dependency)
-            else:
-                self._schedule_recovery(dependency)
+            await self._try_recover(dependency)
         return None
+
+    async def _try_recover(self, dependency: Dependency) -> None:
+        """Resume when recovered, else keep checking in the background."""
+        if await dependency.recovered(self):
+            dependency.is_down = False
+            await self._resume_if_cleared(dependency)
+        else:
+            self._schedule_recovery(dependency)
 
     def _schedule_recovery(self, dependency: Dependency) -> None:
         """Keep checking recovery without messages, once per interval.
@@ -428,6 +427,7 @@ class Checkpoint:
         """
         if not dependency.recovery_interval or dependency.recovery_task:
             return
+        Conf().register_exit_hook(self._cancel_recovery_tasks)
         dependency.recovery_task = create_task(
             self._retry_recovery(dependency),
         )
@@ -452,13 +452,17 @@ class Checkpoint:
             while interval and dependency.is_down:
                 await sleep(interval.total_seconds())
                 try:
-                    if dependency.is_down and await dependency.recovered(self):
-                        dependency.is_down = False
-                        await self._resume_if_cleared(dependency)
+                    recovered = (
+                        dependency.is_down and await dependency.recovered(self)
+                    )
                 except Exception:
                     _logger.exception(
                         f'Recovery check of "{dependency.name}" failed',
                     )
+                    continue
+                if recovered:
+                    dependency.is_down = False
+                    await self._resume_if_cleared(dependency)
         finally:
             dependency.recovery_task = None
 
