@@ -1,6 +1,6 @@
 """Checkpointing tests."""
 
-from asyncio import Event, create_task, sleep
+from asyncio import Event, create_task, gather, sleep
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -1193,3 +1193,55 @@ async def test_recovery_interval_rechecks_without_new_messages(mocker):
     assert check.call_count == 3
     recovered.assert_called_once_with(cp, dep)
     assert dep.recovery_task is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_retry_survives_check_error(mocker):
+    """Should keep polling when a background recovery check raises."""
+    check = mocker.AsyncMock(side_effect=[False, RuntimeError('boom'), True])
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=timedelta(milliseconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    dep.is_down = True
+
+    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    await sleep(0.1)
+    assert dep.is_down is False
+    assert check.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_recovery_task_cancelled_on_shutdown(mocker):
+    """Should cancel the background recovery worker on shutdown."""
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=mocker.AsyncMock(return_value=False),
+        recovery_interval=timedelta(seconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    dep.is_down = True
+
+    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert dep.recovery_task is not None
+    await cp._cancel_recovery_tasks()
+    assert dep.recovery_task is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_reserved_before_check_finishes(mocker):
+    """Should not start an overlapping check within the interval."""
+    check = mocker.AsyncMock(return_value=False)
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=timedelta(seconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    await gather(dep.recovered(cp), dep.recovered(cp))
+    assert check.call_count == 1

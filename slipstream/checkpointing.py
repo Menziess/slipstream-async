@@ -1,7 +1,7 @@
 """Slipstream checkpointing."""
 
 import logging
-from asyncio import Task, create_task, sleep
+from asyncio import Task, create_task, gather, sleep
 from collections.abc import (
     AsyncIterable,
     AsyncIterator,
@@ -117,8 +117,10 @@ class Dependency:
             and now - last < self.recovery_interval.total_seconds()
         ):
             return False
+        self._last_recovery_check = now
         ok = await awaitable(self.recovery_check(checkpoint, self))
-        self._last_recovery_check = None if ok else now
+        if ok:
+            self._last_recovery_check = None
         return ok
 
     def uses_default_downtime_check(self) -> bool:
@@ -281,6 +283,7 @@ class Checkpoint:
         self._downtime_callback = on_downtime
         self._recovery_callback = on_recovery
         self._awaiting_resume = False
+        Conf().register_exit_hook(self._cancel_recovery_tasks)
 
         self.state = {}
         self.state_marker: Any = None
@@ -429,15 +432,33 @@ class Checkpoint:
             self._retry_recovery(dependency),
         )
 
+    async def _cancel_recovery_tasks(self) -> None:
+        """Stop background recovery checks when streaming shuts down."""
+        tasks = [
+            d.recovery_task
+            for d in self.dependencies.values()
+            if d.recovery_task
+        ]
+        for task in tasks:
+            task.cancel()
+        await gather(*tasks, return_exceptions=True)
+        for dependency in self.dependencies.values():
+            dependency.recovery_task = None
+
     async def _retry_recovery(self, dependency: Dependency) -> None:
         """Check recovery every interval until the dependency is up."""
         interval = dependency.recovery_interval
         try:
             while interval and dependency.is_down:
                 await sleep(interval.total_seconds())
-                if dependency.is_down and await dependency.recovered(self):
-                    dependency.is_down = False
-                    await self._resume_if_cleared(dependency)
+                try:
+                    if dependency.is_down and await dependency.recovered(self):
+                        dependency.is_down = False
+                        await self._resume_if_cleared(dependency)
+                except Exception:
+                    _logger.exception(
+                        f'Recovery check of "{dependency.name}" failed',
+                    )
         finally:
             dependency.recovery_task = None
 
