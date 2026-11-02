@@ -10,6 +10,7 @@ from collections.abc import (
 )
 from datetime import datetime, timedelta
 from functools import wraps
+from time import monotonic
 from typing import Any
 
 from slipstream.core import Conf, Signal
@@ -67,6 +68,9 @@ class Dependency:
     The dependency name should not be changed once created,
     it is used to persist the dependency in the cache.
 
+    ``recovery_check`` runs on every heartbeat while down. Pass a
+    ``recovery_interval`` to run an expensive check less often.
+
     >>> async def emoji():
     ...     for emoji in '🏆📞🐟👌':
     ...         yield emoji
@@ -83,6 +87,7 @@ class Dependency:
         | None = None,
         recovery_check: AsyncCallable[['Checkpoint', 'Dependency'], bool]
         | None = None,
+        recovery_interval: timedelta | None = None,
         marker: Callable[..., Any] | str | None = None,
         state: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
@@ -97,6 +102,21 @@ class Dependency:
         self.marker = marker
         self.state_extractor = state
         self.is_down = False
+        self.recovery_interval = recovery_interval
+        self._last_recovery_check: float | None = None
+
+    async def recovered(self, checkpoint: 'Checkpoint') -> bool:
+        """Run ``recovery_check``, at most once per ``recovery_interval``."""
+        now = monotonic()
+        last = self._last_recovery_check
+        if (
+            self.recovery_interval
+            and last is not None
+            and now - last < self.recovery_interval.total_seconds()
+        ):
+            return False
+        self._last_recovery_check = now
+        return await awaitable(self.recovery_check(checkpoint, self))
 
     def uses_default_downtime_check(self) -> bool:
         """Return whether first-pulse event-time seeding applies."""
@@ -309,7 +329,7 @@ class Checkpoint:
         )
 
         if dependency.is_down:
-            if await awaitable(dependency.recovery_check(self, dependency)):
+            if await dependency.recovered(self):
                 dependency.is_down = False
             await self._resume_if_cleared(dependency)
 
@@ -384,9 +404,7 @@ class Checkpoint:
                 dependency.is_down = True
             return down_now
 
-        if dependency.is_down and await awaitable(
-            dependency.recovery_check(self, dependency)
-        ):
+        if dependency.is_down and await dependency.recovered(self):
             dependency.is_down = False
             await self._resume_if_cleared(dependency)
         return None

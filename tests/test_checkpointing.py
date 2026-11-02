@@ -1098,3 +1098,53 @@ async def test_handle_passes_downtime_argument():
     assert seen
     assert seen[0] == timedelta(hours=1)
     assert list(seen[0].values()) == [timedelta(hours=1)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('interval', 'calls'),
+    [(None, 3), (timedelta(hours=1), 1)],
+    ids=['every-heartbeat', 'throttled'],
+)
+async def test_recovery_interval_limits_recovery_checks(
+    interval,
+    calls,
+    mocker,
+):
+    """Should run recovery_check at most once per recovery_interval."""
+    check = mocker.AsyncMock(return_value=False)
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=interval,
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    dep.is_down = True
+    for _ in range(3):
+        await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert check.call_count == calls
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_elapsed_checks_again(mocker):
+    """Should check again once the interval has passed."""
+    check = mocker.AsyncMock(side_effect=[False, True])
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=timedelta(seconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    dep.is_down = True
+    clock = mocker.patch('slipstream.checkpointing.monotonic')
+    clock.return_value = 100.0
+    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    clock.return_value = 105.0
+    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert dep.is_down is True
+    clock.return_value = 111.0
+    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert dep.is_down is False
+    assert check.call_count == 2
