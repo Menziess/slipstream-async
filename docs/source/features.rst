@@ -341,5 +341,6 @@ While a dependency is down, ``recovery_check`` runs on every heartbeat (each dep
 
 - Recovery is noticed up to one interval after the dependency has caught up
 - The first check after downtime is detected runs immediately
+- While down, the check also repeats once per interval in the background, so a paused dependent resumes even when no more messages arrive
 
 A full example is in :ref:`cookbook:synchronization`.

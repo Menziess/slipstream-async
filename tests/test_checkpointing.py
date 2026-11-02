@@ -1167,3 +1167,29 @@ async def test_recovery_interval_resets_after_recovery(mocker):
         clock.return_value = now
         await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
     assert check.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_recovery_interval_rechecks_without_new_messages(mocker):
+    """Should recover and resume without another message."""
+    check = mocker.AsyncMock(side_effect=[False, False, True])
+    dep = Dependency(
+        'dependency',
+        emoji(),
+        recovery_check=check,
+        recovery_interval=timedelta(milliseconds=10),
+    )
+    cp = Checkpoint(emoji(), dep, name='dependent')
+    cp._awaiting_resume = True
+    recovered = mocker.AsyncMock()
+    cp._recovery_callback = recovered
+    dep.is_down = True
+
+    await cp.heartbeat(datetime(2025, 1, 1, tzinfo=UTC))
+    assert dep.is_down is True
+
+    await sleep(0.1)
+    assert dep.is_down is False
+    assert check.call_count == 3
+    recovered.assert_called_once_with(cp, dep)
+    assert dep.recovery_task is None

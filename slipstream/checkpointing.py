@@ -1,6 +1,7 @@
 """Slipstream checkpointing."""
 
 import logging
+from asyncio import Task, create_task, sleep
 from collections.abc import (
     AsyncIterable,
     AsyncIterator,
@@ -104,6 +105,7 @@ class Dependency:
         self.is_down = False
         self.recovery_interval = recovery_interval
         self._last_recovery_check: float | None = None
+        self.recovery_task: Task | None = None
 
     async def recovered(self, checkpoint: 'Checkpoint') -> bool:
         """Run ``recovery_check``, at most once per ``recovery_interval``."""
@@ -332,6 +334,8 @@ class Checkpoint:
         if dependency.is_down:
             if await dependency.recovered(self):
                 dependency.is_down = False
+            else:
+                self._schedule_recovery(dependency)
             await self._resume_if_cleared(dependency)
 
         return {
@@ -405,10 +409,37 @@ class Checkpoint:
                 dependency.is_down = True
             return down_now
 
-        if dependency.is_down and await dependency.recovered(self):
-            dependency.is_down = False
-            await self._resume_if_cleared(dependency)
+        if dependency.is_down:
+            if await dependency.recovered(self):
+                dependency.is_down = False
+                await self._resume_if_cleared(dependency)
+            else:
+                self._schedule_recovery(dependency)
         return None
+
+    def _schedule_recovery(self, dependency: Dependency) -> None:
+        """Keep checking recovery without messages, once per interval.
+
+        A throttled check can skip the last message that shows the
+        dependency caught up, and a paused dependent sends no pulses.
+        """
+        if not dependency.recovery_interval or dependency.recovery_task:
+            return
+        dependency.recovery_task = create_task(
+            self._retry_recovery(dependency),
+        )
+
+    async def _retry_recovery(self, dependency: Dependency) -> None:
+        """Check recovery every interval until the dependency is up."""
+        interval = dependency.recovery_interval
+        try:
+            while interval and dependency.is_down:
+                await sleep(interval.total_seconds())
+                if dependency.is_down and await dependency.recovered(self):
+                    dependency.is_down = False
+                    await self._resume_if_cleared(dependency)
+        finally:
+            dependency.recovery_task = None
 
     def _signal_dependent(self, signal: Signal) -> None:
         """Pause or resume the dependent iterable when configured to do so."""
